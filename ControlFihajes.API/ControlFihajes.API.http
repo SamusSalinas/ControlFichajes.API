@@ -1,0 +1,20 @@
+@ControlFihajes.API_HostAddress = http://localhost:5052
+
+GET http://localhost:5052/weatherforecast/
+Accept: application/json
+
+###
+POST http://localhost:5052/api/empleados
+Content-Type: application/json
+{
+  "empresaId": 1,
+  "legajo": "EMP-001",
+  "dni": "12345678",
+  "cuil": "20123456789",
+  "nombre": "Samuel",
+  "apellido": "Salinas",
+  "departamento": "Sistemas",
+  "categoria": "Desarrollador",
+  "sucursal": "Sede Central",
+  "horario": "09:00 a 18:00"
+}
