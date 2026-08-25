@@ -20,5 +20,6 @@ namespace ControlFichajes.API.Models
         [Required]
         [Column(TypeName = "TEXT")]
         public string TemplateBiometrico { get; set; } = string.Empty;
+        public DateTime FechaRegistro { get; internal set; }
     }
 }

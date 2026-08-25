@@ -7,7 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 // 1. Configurar la conexión a MySQL usando Pomelo
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
+    options.UseMySql(connectionString, ServerVersion.Parse("8.0.0-mysql")));
     
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

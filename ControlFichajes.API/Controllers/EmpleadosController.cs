@@ -1,6 +1,6 @@
-using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Services;
+using ControlFichajes.API.DTOs;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ControlFichajes.API.Controllers
@@ -17,10 +17,37 @@ namespace ControlFichajes.API.Controllers
             _empleadoService = empleadoService;
         }
 
+        // POST: api/Empleados/enrolar
+        [HttpPost("enrolar")]
+        public async Task<IActionResult> EnrolarEmpleado([FromBody] HuellaEnrolarDto huellaDto)
+        {
+            try
+            {
+                var resultado = await _empleadoService.EnrolarHuellaAsync(huellaDto);
+
+                if (!resultado)
+                    return NotFound(new { mensaje = "Empleado no encontrado." });
+
+                return Ok(new { mensaje = "Huella enrolada exitosamente." });
+            }
+            catch (Exception ex)
+            {
+                // Por si el Base64 viene mal formado u otro error
+                return BadRequest(new { mensaje = "Error al procesar la huella.", detalle = ex.Message });
+            }
+        }
+
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleados()
         {
             var empleados = await _empleadoService.ObtenerTodosActivosAsync();
+            return Ok(empleados);
+        }
+
+        [HttpGet("empresa/{empresaId:int}")]
+        public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleadosPorEmpresa(int empresaId)
+        {
+            var empleados = await _empleadoService.ObtenerActivosPorEmpresaAsync(empresaId);
             return Ok(empleados);
         }
 

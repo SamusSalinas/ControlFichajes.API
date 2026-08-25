@@ -20,6 +20,14 @@ namespace ControlFichajes.API.Services
             return await _context.Empleado.Where(e => e.Activo).ToListAsync();
         }
 
+        public async Task<IEnumerable<Empleado>> ObtenerActivosPorEmpresaAsync(int empresaId)
+        {
+            return await _context.Empleado
+                .AsNoTracking()
+                .Where(e => e.EmpresaId == empresaId && e.Activo)
+                .ToListAsync();
+        }
+
         public async Task<Empleado?> ObtenerPorIdAsync(int id)
         {
             return await _context.Empleado.FirstOrDefaultAsync(e => e.Id == id && e.Activo);
@@ -62,6 +70,31 @@ namespace ControlFichajes.API.Services
             // En lugar de borrar físicamente, cambiamos el estado
             empleado.Activo = false;
             await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> EnrolarHuellaAsync(HuellaEnrolarDto dto)
+        {
+            // 1. Verificamos que el empleado exista
+            var empleado = await _context.Empleado.FindAsync(dto.EmpleadoId);
+            if (empleado == null)
+            {
+                return false; // El empleado no existe
+            }
+
+            // 3. Creamos la entidad Huella
+            var nuevaHuella = new Huella
+            {
+                EmpleadoId = dto.EmpleadoId,
+                TemplateBiometrico = dto.TemplateHuellaBase64,
+                NombreDedo = dto.IndiceDedo.ToString(),
+                FechaRegistro = DateTime.UtcNow
+            };
+
+            // 4. Guardamos en la base de datos
+            _context.Huella.Add(nuevaHuella);
+            await _context.SaveChangesAsync();
+
             return true;
         }
     }

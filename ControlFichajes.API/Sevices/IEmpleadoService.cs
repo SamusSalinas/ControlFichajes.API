@@ -6,8 +6,11 @@ namespace ControlFichajes.API.Services
     public interface IEmpleadoService
     {
         Task<IEnumerable<Empleado>> ObtenerTodosActivosAsync();
+        Task<IEnumerable<Empleado>> ObtenerActivosPorEmpresaAsync(int empresaId);
         Task<Empleado?> ObtenerPorIdAsync(int id);
         Task<Empleado> CrearAsync(EmpleadoRegistroDto dto);
         Task<bool> BorradoLogicoAsync(int id);
+
+        Task<bool> EnrolarHuellaAsync(HuellaEnrolarDto huellaDto);
     }
 }

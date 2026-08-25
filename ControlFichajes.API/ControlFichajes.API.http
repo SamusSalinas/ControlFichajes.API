@@ -1,4 +1,4 @@
-@ControlFihajes.API_HostAddress = http://localhost:5052
+@ControlFichajes.API_HostAddress = http://localhost:5052
 
 GET http://localhost:5052/weatherforecast/
 Accept: application/json
@@ -17,4 +17,17 @@ Content-Type: application/json
   "categoria": "Desarrollador",
   "sucursal": "Sede Central",
   "horario": "09:00 a 18:00"
+}
+
+###
+GET http://localhost:5052/api/empleados
+
+###
+POST http://localhost:5052/api/empleados/enrolar
+Content-Type: application/json
+
+{
+  "empleadoId": 1,
+  "templateHuellaBase64": "SGVsbG8gV29ybGQ=",
+  "indiceDedo": 1
 }
