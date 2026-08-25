@@ -5,6 +5,12 @@
 
 # dotenv files
 .env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local application settings
+appsettings.*.local.json
 
 # User-specific files
 *.rsuser
