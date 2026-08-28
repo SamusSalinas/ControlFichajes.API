@@ -1,11 +1,13 @@
 using ControlFichajes.API.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 
 namespace ControlFichajes.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class HuellasController : ControllerBase
 {
     private readonly AppDbContext _context;
@@ -18,6 +20,9 @@ public class HuellasController : ControllerBase
     [HttpGet("empresa/{empresaId:int}")]
     public async Task<IActionResult> GetHuellasPorEmpresa(int empresaId)
     {
+        if (!EmpresaAccess.PerteneceAUsuario(User, empresaId))
+            return Forbid();
+
         var huellas = await _context.Huella
             .AsNoTracking()
             .Where(h => h.Empleado != null && h.Empleado.EmpresaId == empresaId && h.Empleado.Activo)
@@ -25,7 +30,7 @@ public class HuellasController : ControllerBase
             {
                 h.Id,
                 h.EmpleadoId,
-                h.NombreDedo,
+                h.IndiceDedo,
                 h.TemplateBiometrico
             })
             .ToListAsync();

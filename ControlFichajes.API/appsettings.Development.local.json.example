@@ -1,5 +1,11 @@
 {
   "ConnectionStrings": {
     "DefaultConnection": "Server=127.0.0.1;Port=3307;Database=tesis_db;Uid=REEMPLAZAR;Pwd=REEMPLAZAR;"
+  },
+  "Cors": {
+    "AllowedOrigins": [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ]
   }
 }
