@@ -62,9 +62,10 @@ namespace ControlFichajes.API.Services
             return nuevoEmpleado;
         }
 
-        public async Task<bool> BorradoLogicoAsync(int id)
+        public async Task<bool> BorradoLogicoAsync(int id, int empresaId)
         {
-            var empleado = await _context.Empleado.FindAsync(id);
+            var empleado = await _context.Empleado
+                .FirstOrDefaultAsync(e => e.Id == id && e.EmpresaId == empresaId);
             if (empleado == null) return false;
 
             // En lugar de borrar físicamente, cambiamos el estado
@@ -73,11 +74,14 @@ namespace ControlFichajes.API.Services
             return true;
         }
 
-        public async Task<bool> EnrolarHuellaAsync(HuellaEnrolarDto dto)
+        public async Task<bool> EnrolarHuellaAsync(HuellaEnrolarDto dto, int empresaId)
         {
             // 1. Verificamos que el empleado exista
-            var empleado = await _context.Empleado.FindAsync(dto.EmpleadoId);
-            if (empleado == null)
+            var empleado = await _context.Empleado
+                .FirstOrDefaultAsync(e => e.Id == dto.EmpleadoId
+                    && e.EmpresaId == empresaId
+                    && e.Activo);
+            if (empleado == null || string.IsNullOrWhiteSpace(dto.TemplateHuellaBase64))
             {
                 return false; // El empleado no existe
             }

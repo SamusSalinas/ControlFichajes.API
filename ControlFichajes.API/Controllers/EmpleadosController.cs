@@ -1,12 +1,14 @@
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Services;
 using ControlFichajes.API.DTOs;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ControlFichajes.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class EmpleadosController : ControllerBase
     {
         // Inyectamos el servicio, igual que hiciste con tu ITransaccionService anterior
@@ -23,7 +25,10 @@ namespace ControlFichajes.API.Controllers
         {
             try
             {
-                var resultado = await _empleadoService.EnrolarHuellaAsync(huellaDto);
+                if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
+                    return Forbid();
+
+                var resultado = await _empleadoService.EnrolarHuellaAsync(huellaDto, empresaId);
 
                 if (!resultado)
                     return NotFound(new { mensaje = "Empleado no encontrado." });
@@ -40,13 +45,19 @@ namespace ControlFichajes.API.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleados()
         {
-            var empleados = await _empleadoService.ObtenerTodosActivosAsync();
+            if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
+                return Forbid();
+
+            var empleados = await _empleadoService.ObtenerActivosPorEmpresaAsync(empresaId);
             return Ok(empleados);
         }
 
         [HttpGet("empresa/{empresaId:int}")]
         public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleadosPorEmpresa(int empresaId)
         {
+            if (!EmpresaAccess.PerteneceAUsuario(User, empresaId))
+                return Forbid();
+
             var empleados = await _empleadoService.ObtenerActivosPorEmpresaAsync(empresaId);
             return Ok(empleados);
         }
@@ -56,6 +67,8 @@ namespace ControlFichajes.API.Controllers
         {
             var empleado = await _empleadoService.ObtenerPorIdAsync(id);
             if (empleado == null) return NotFound("Empleado no encontrado o inactivo.");
+            if (!EmpresaAccess.PerteneceAUsuario(User, empleado.EmpresaId))
+                return Forbid();
             
             return Ok(empleado);
         }
@@ -63,6 +76,9 @@ namespace ControlFichajes.API.Controllers
         [HttpPost]
         public async Task<ActionResult<Empleado>> PostEmpleado(EmpleadoRegistroDto dto)
         {
+            if (!EmpresaAccess.PerteneceAUsuario(User, dto.EmpresaId))
+                return Forbid();
+
             try
             {
                 // El servicio intenta crear el empleado validando que el DNI no exista
@@ -81,7 +97,10 @@ namespace ControlFichajes.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteEmpleado(int id)
         {
-            var resultado = await _empleadoService.BorradoLogicoAsync(id);
+            if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
+                return Forbid();
+
+            var resultado = await _empleadoService.BorradoLogicoAsync(id, empresaId);
             if (!resultado) return NotFound("Empleado no encontrado.");
             
             return Ok(new { mensaje = "Empleado dado de baja exitosamente." });
