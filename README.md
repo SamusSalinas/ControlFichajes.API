@@ -1,27 +1,34 @@
-# ControlFichajes.API
+ControlFichajes.API
 
 API REST para gestionar empresas, empleados, huellas biométricas y fichadas.
 El backend es la fuente de verdad del contrato que consumirán posteriormente
 el cliente biométrico y el frontend.
 
-## Requisitos
+Requisitos
 
-- .NET 10 SDK
-- MySQL 8
-- Docker opcional para desplegar en el servidor
 
-## Contrato de la API
+
+
+
+.NET 10 SDK
+
+
+
+MySQL 8
+
+
+
+Docker opcional para desplegar en el servidor
+
+Contrato de la API
 
 Todos los endpoints siguientes, excepto el login y el registro inicial,
 requieren:
 
-```http
 Authorization: Bearer <token>
-```
 
-### Autenticación
+Autenticación
 
-```http
 POST /api/auth/login
 Content-Type: application/json
 
@@ -29,19 +36,17 @@ Content-Type: application/json
 	"email": "usuario@dominio.local",
 	"password": "********"
 }
-```
 
-La respuesta contiene `token` y `mensaje`. Las contraseñas almacenadas en
-`Usuario.PasswordHash` deben ser hashes generados con
-`PasswordHasher<Usuario>`.
+La respuesta contiene token y mensaje. Las contraseñas almacenadas en
+Usuario.PasswordHash deben ser hashes generados con
+PasswordHasher<Usuario>.
 
-### Registro de usuarios
+Registro de usuarios
 
 El primer usuario se crea una sola vez mediante el endpoint de bootstrap. Este
-endpoint solo funciona cuando la tabla `Usuario` está vacía y crea un usuario
-con rol `ADMIN`:
+endpoint solo funciona cuando la tabla Usuario está vacía y crea un usuario
+con rol ADMIN:
 
-```http
 POST /api/auth/bootstrap
 Content-Type: application/json
 
@@ -52,14 +57,12 @@ Content-Type: application/json
 	"password": "UnaClaveSegura123",
 	"rol": "ADMIN"
 }
-```
 
 La empresa indicada debe existir previamente. La respuesta devuelve un JWT,
 por lo que se puede reutilizar directamente como Bearer token.
 
 Después, un administrador puede registrar a sus compañeros mediante:
 
-```http
 POST /api/usuarios
 Authorization: Bearer <token-del-admin>
 Content-Type: application/json
@@ -71,18 +74,16 @@ Content-Type: application/json
 	"password": "OtraClaveSegura123",
 	"rol": "RRHH"
 }
-```
 
-Solo se permiten los roles `ADMIN` y `RRHH`. El administrador no puede crear
+Solo se permiten los roles ADMIN y RRHH. El administrador no puede crear
 usuarios para otra empresa. Las contraseñas se almacenan como hash y nunca se
 devuelven en la respuesta.
 
-Si ya existe algún usuario, `POST /api/auth/bootstrap` responde `409 Conflict`.
+Si ya existe algún usuario, POST /api/auth/bootstrap responde 409 Conflict.
 En ese caso, utiliza el token de un administrador para crear nuevos usuarios.
 
-### Empleados y huellas
+Empleados y huellas
 
-```text
 GET  /api/empleados
 GET  /api/empleados/empresa/{empresaId}
 GET  /api/empleados/{id}
@@ -90,89 +91,180 @@ POST /api/empleados
 POST /api/empleados/enrolar
 DELETE /api/empleados/{id}
 GET  /api/huellas/empresa/{empresaId}
-```
 
-El `empresa_id` del JWT limita todas las operaciones a la empresa del usuario.
-El enrolamiento recibe `empleadoId`, `templateHuellaBase64` e `indiceDedo`.
+El empresa_id del JWT limita todas las operaciones a la empresa del usuario.
+El enrolamiento recibe empleadoId, templateHuellaBase64 e indiceDedo.
 La plantilla debe ser FMD ANSI binaria serializada como Base64; no se acepta
 mezclarla con XML.
 
-### Fichadas
+Fichadas
 
-```text
 GET  /api/fichadas?empleadoId=1&desde=2026-08-01&hasta=2026-09-01&tipo=Entrada&metodo=Biometrico&limite=100
 POST /api/fichadas/bulk
-```
 
-Los valores válidos son `Entrada` y `Salida` para `TipoRegistro`, y
-`Biometrico`, `Biométrico` o `Manual` para `Metodo`. El lote admite como máximo
+Los valores válidos son Entrada y Salida para TipoRegistro, y
+Biometrico, Biométrico o Manual para Metodo. El lote admite como máximo
 500 elementos y solo empleados activos de la empresa del token.
 
-Las fechas deben enviarse en formato ISO 8601. El `GET` devuelve `id`,
-`empleadoId`, `nombre`, `apellido`, `legajo`, `fechaHora`, `tipo` y `metodo`.
+Las fechas deben enviarse en formato ISO 8601. El GET devuelve id,
+empleadoId, nombre, apellido, legajo, fechaHora, tipo y metodo.
 
-## Configuración local
+Configuración local
 
-## Desarrollo local
+
+
+Desarrollo local
 
 Abre un túnel SSH hacia MySQL y deja esa terminal abierta:
 
-```powershell
 ssh -i "ssh-key-2026-03-27.key" -N -L 3307:127.0.0.1:3306 ubuntu@161.153.193.159
-```
 
-Copia `ControlFichajes.API/appsettings.Development.local.json.example` como
-`ControlFichajes.API/appsettings.Development.local.json`, sustituye `REEMPLAZAR`
+Copia ControlFichajes.API/appsettings.Development.local.json.example como
+ControlFichajes.API/appsettings.Development.local.json, sustituye REEMPLAZAR
 por las credenciales de MySQL y agrega la clave JWT mediante configuración de
 usuario o variable de entorno. Configura también los orígenes permitidos en
-`Cors:AllowedOrigins`.
+Cors:AllowedOrigins.
 
 Para compilar y validar:
 
-```powershell
 dotnet restore
 dotnet build ControlFichajes.sln
-```
 
-El documento OpenAPI se publica en desarrollo mediante `MapOpenApi`.
+El documento OpenAPI se publica en desarrollo mediante MapOpenApi.
 
-## Despliegue en el servidor
+Despliegue en el servidor
 
 En el servidor, comprueba si Compose está instalado:
 
-```bash
 docker compose version
-```
 
 Si aparece un error o la versión no existe, instala el plugin de Compose:
 
-```bash
 sudo apt-get update
 sudo apt-get install -y docker-compose-plugin
 docker compose version
-```
 
 Después clona el repositorio:
 
-```bash
 git clone https://github.com/SamusSalinas/ControlFichajes.API.git
 cd ControlFichajes.API/ControlFichajes.API
 cp .env.production.example .env.production
 nano .env.production
 docker compose up -d --build
 docker compose logs -f api
-```
 
-Si tu distribución no ofrece `docker-compose-plugin`, usa el comando legado
-equivalente en todos los pasos: `docker-compose up -d --build` y
-`docker-compose logs -f api`.
+Si tu distribución no ofrece docker-compose-plugin, usa el comando legado
+equivalente en todos los pasos: docker-compose up -d --build y
+docker-compose logs -f api.
 
 El contenedor usa la red del host para alcanzar el MySQL local en
-`127.0.0.1:3306`, sin publicar MySQL a Internet. La API queda disponible en
-`http://161.153.193.159:8080`.
+127.0.0.1:3306, sin publicar MySQL a Internet. La API queda disponible en
+http://161.153.193.159:8080.
 Para actualizarla:
 
-```bash
 git pull
 docker compose up -d --build
-```
+
+
+
+Cambios de la rama corregida
+
+Diff frente a origin/pruebas/api-estable. Solo estos tres archivos.
+
+Models/Huella.cs
+
+Se quitó el inicializador = string.Empty de IndiceDedo. Era inválido:
+asignaba una cadena a un int. FechaRegistro no cambió; ya existía en
+pruebas/api-estable.
+
+Controllers/HuellasController.cs
+
+h.NombreDedo pasó a h.IndiceDedo. NombreDedo no existe en el modelo
+Huella.
+
+.env.production.example
+
+Se agregaron variables de ejemplo (no son secretos reales):
+
+
+
+
+
+Jwt__Key
+
+
+
+Jwt__Issuer
+
+
+
+Jwt__Audience
+
+
+
+Jwt__ExpireMinutes
+
+
+
+Cors__AllowedOrigins__0
+
+Copiar a .env.production y reemplazar los placeholders.
+
+Validación
+
+La rama se validó localmente con dotnet build sobre .NET 10 y compiló
+correctamente.
+
+Comparación antes y después
+
+Capturas opcionales en docs/images/.
+
+Huella.cs
+
+Antes (pruebas/api-estable)
+
+public int IndiceDedo { get; set; } = string.Empty;
+
+
+
+Después (pruebas/api-estable-corregida)
+
+public int IndiceDedo { get; set; }
+
+
+
+HuellasController.cs
+
+Antes (pruebas/api-estable)
+
+h.NombreDedo,
+
+
+
+Después (pruebas/api-estable-corregida)
+
+h.IndiceDedo,
+
+
+
+.env.production.example
+
+Antes (pruebas/api-estable)
+
+ConnectionStrings__DefaultConnection=Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=dev_user;Pwd=REEMPLAZAR;
+
+Después (pruebas/api-estable-corregida)
+
+ConnectionStrings__DefaultConnection=Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=dev_user;Pwd=REEMPLAZAR;
+
+Jwt__Key=REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA
+Jwt__Issuer=ControlFichajes.API
+Jwt__Audience=ControlFichajes.Frontend
+Jwt__ExpireMinutes=60
+
+Cors__AllowedOrigins__0=http://localhost:5173
+
+
+
+Compilación
+
