@@ -35,6 +35,12 @@ namespace ControlFichajes.API.Controllers
 
                 return Ok(new { mensaje = "Huella enrolada exitosamente." });
             }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
+            {
+                // Obtiene el mensaje directo que devolvió la Base de Datos (MySQL / PostgreSQL)
+                var dbError = dbEx.InnerException != null ? dbEx.InnerException.Message : dbEx.Message;
+                return BadRequest(new { mensaje = "Error en la BD al guardar la huella.", detalle = dbError });
+            }
             catch (Exception ex)
             {
                 // Por si el Base64 viene mal formado u otro error

@@ -91,7 +91,7 @@ namespace ControlFichajes.API.Services
             {
                 EmpleadoId = dto.EmpleadoId,
                 TemplateBiometrico = dto.TemplateHuellaBase64,
-                NombreDedo = dto.IndiceDedo.ToString(),
+                IndiceDedo = dto.IndiceDedo,
                 FechaRegistro = DateTime.UtcNow
             };
 

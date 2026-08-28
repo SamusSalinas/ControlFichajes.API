@@ -14,8 +14,7 @@ namespace ControlFichajes.API.Models
         public virtual Empleado? Empleado { get; set; }
 
         [Required]
-        [MaxLength(30)]
-        public string NombreDedo { get; set; } = string.Empty;
+        public int IndiceDedo { get; set; } = string.Empty;
 
         [Required]
         [Column(TypeName = "TEXT")]
