@@ -10,15 +10,17 @@ namespace ControlFichajes.API.Models
 
         [Required]
         public int EmpleadoId { get; set; }
+
         [ForeignKey("EmpleadoId")]
         public virtual Empleado? Empleado { get; set; }
 
         [Required]
-        public int IndiceDedo { get; set; } = string.Empty;
+        public int IndiceDedo { get; set; }
 
         [Required]
         [Column(TypeName = "TEXT")]
         public string TemplateBiometrico { get; set; } = string.Empty;
+
         public DateTime FechaRegistro { get; internal set; }
     }
 }

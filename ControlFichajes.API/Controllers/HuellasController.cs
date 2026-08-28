@@ -30,7 +30,7 @@ public class HuellasController : ControllerBase
             {
                 h.Id,
                 h.EmpleadoId,
-                h.NombreDedo,
+                h.IndiceDedo,
                 h.TemplateBiometrico
             })
             .ToListAsync();
