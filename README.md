@@ -182,6 +182,35 @@ dotnet restore
 dotnet build ControlFichajes.sln
 ```
 
+## Pruebas
+
+El repositorio incluye un proyecto de pruebas en:
+
+```text
+ControlFichajes.API.Tests
+```
+
+Estas pruebas validan la lógica principal de autenticación y empleados usando EF Core InMemory para evitar depender de MySQL durante la ejecución local de pruebas.
+
+Ejecutar toda la suite:
+
+```powershell
+dotnet test ControlFichajes.API.Tests/ControlFichajes.API.Tests.csproj -nologo
+```
+
+También puede ejecutarse desde la solución:
+
+```powershell
+dotnet test ControlFichajes.sln -nologo
+```
+
+La validación actual cubre:
+
+- registro de usuarios
+- login con credenciales inválidas
+- prevención de duplicados en DNI/CUIL
+- enrolamiento de huellas para empleados activos
+
 El documento OpenAPI se publica en desarrollo mediante `MapOpenApi`.
 
 ## Despliegue en el servidor

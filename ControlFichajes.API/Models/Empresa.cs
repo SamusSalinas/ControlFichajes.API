@@ -22,5 +22,6 @@ namespace ControlFichajes.API.Models
         // Propiedades de navegación (Magia de Entity Framework)
         public virtual ICollection<Empleado> Empleados { get; set; } = new List<Empleado>();
         public virtual ICollection<Usuario> Usuarios { get; set; } = new List<Usuario>();
+        public virtual ICollection<Sucursal> Sucursales { get; set; } = new List<Sucursal>();
     }
 }
