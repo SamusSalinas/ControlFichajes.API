@@ -232,9 +232,7 @@ docker compose version
 Clonar el repositorio y acceder al proyecto:
 
 ```bash
-git clone https://github.com/centralmat12/ControlFichajes.API-corregida.git
-cd ControlFichajes.API-corregida
-git switch pruebas/api-estable-corregida
+git clone https://github.com/SamusSalinas/ControlFichajes.API.git
 cd ControlFichajes.API
 ```
 
@@ -297,67 +295,17 @@ Si la distribución utiliza el comando legado de Docker Compose, reemplazar `doc
 
 ---
 
-# Cambios de la rama corregida
+## Variables de entorno de producción
 
-La rama:
+Se sugiere mantener el archivo `.env.production` localmente en el entorno real y no versionarlo en Git.
 
-```text
-pruebas/api-estable-corregida
-```
+La plantilla `.env.production.example` incluye las variables esenciales para:
 
-parte de:
+- cadena de conexión a MySQL
+- JWT
+- CORS
+- configuración del entorno de despliegue
 
-```text
-pruebas/api-estable
-```
-
-Los cambios documentados a continuación corresponden a correcciones realizadas sobre la rama base. No incorporan nueva lógica de negocio.
-
-## `Models/Huella.cs`
-
-Se corrigió la propiedad `IndiceDedo`.
-
-En `pruebas/api-estable` estaba definida de la siguiente manera:
-
-```csharp
-public int IndiceDedo { get; set; } = string.Empty;
-```
-
-El inicializador era inválido porque intentaba asignar una cadena de texto (`string`) a una propiedad de tipo `int`.
-
-En la rama corregida quedó:
-
-```csharp
-public int IndiceDedo { get; set; }
-```
-
-La propiedad `FechaRegistro` ya existía en `pruebas/api-estable`, por lo que no fue incorporada como parte de esta corrección.
-
-## `Controllers/HuellasController.cs`
-
-El endpoint:
-
-```text
-GET /api/huellas/empresa/{empresaId}
-```
-
-utilizaba una propiedad inexistente del modelo:
-
-```csharp
-h.NombreDedo,
-```
-
-Se reemplazó por:
-
-```csharp
-h.IndiceDedo,
-```
-
-De esta forma, la respuesta del endpoint queda alineada con el modelo `Huella` y con el identificador utilizado durante el enrolamiento.
-
-## `.env.production.example`
-
-Se incorporaron a la plantilla de producción las variables necesarias para configurar JWT y CORS:
 
 ```text
 Jwt__Key

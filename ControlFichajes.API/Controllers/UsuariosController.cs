@@ -1,3 +1,4 @@
+using ControlFichajes.API.Constants;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -20,11 +21,10 @@ public class UsuariosController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Crear(UsuarioRegistroDto request)
     {
-        if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId)
-            || request.EmpresaId != empresaId)
+        if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || request.EmpresaId != empresaId)
             return Forbid();
 
-        if (request.Rol is not ("ADMIN" or "RRHH"))
+        if (request.Rol is not (AppRoles.Admin or AppRoles.Rrhh))
             return BadRequest(new { mensaje = "El rol debe ser ADMIN o RRHH." });
 
         var response = await _authService.RegistrarUsuarioAsync(request, bootstrap: false);
