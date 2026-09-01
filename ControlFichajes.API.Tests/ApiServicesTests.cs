@@ -142,6 +142,71 @@ public class EmpleadoServiceTests
     }
 
     [Fact]
+    public async Task ActualizarAsync_ConEmpleadoActivo_ActualizaCamposPermitidos()
+    {
+        await using var context = CreateContext();
+        var service = new EmpleadoService(context);
+
+        context.Empleado.Add(new Empleado
+        {
+            Id = 10,
+            EmpresaId = 1,
+            DNI = "87654321",
+            CUIL = "20-87654321-9",
+            Nombre = "María",
+            Apellido = "Pérez",
+            Departamento = "Ventas",
+            Categoria = "Operario",
+            Sucursal = "Central",
+            Horario = "Turno A",
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        var actualizado = await service.ActualizarAsync(10, 1, new EmpleadoPatchDto
+        {
+            Nombre = "María Elena",
+            Departamento = "Administración",
+            Categoria = "Analista",
+            Sucursal = "Norte",
+            Horario = "Turno B"
+        });
+
+        Assert.NotNull(actualizado);
+        Assert.Equal("María Elena", actualizado!.Nombre);
+        Assert.Equal("Administración", actualizado.Departamento);
+        Assert.Equal("Analista", actualizado.Categoria);
+        Assert.Equal("Norte", actualizado.Sucursal);
+        Assert.Equal("Turno B", actualizado.Horario);
+    }
+
+    [Fact]
+    public async Task BorradoLogicoAsync_ConEmpleadoActivo_MarcaInactivoSinEliminarRegistro()
+    {
+        await using var context = CreateContext();
+        var service = new EmpleadoService(context);
+
+        context.Empleado.Add(new Empleado
+        {
+            Id = 15,
+            EmpresaId = 1,
+            DNI = "11111111",
+            CUIL = "20-11111111-9",
+            Nombre = "Carlos",
+            Apellido = "Diaz",
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        var ok = await service.BorradoLogicoAsync(15, 1);
+
+        Assert.True(ok);
+        var empleado = await context.Empleado.FindAsync(15);
+        Assert.NotNull(empleado);
+        Assert.False(empleado!.Activo);
+    }
+
+    [Fact]
     public async Task EnrolarHuellaAsync_ConEmpleadoActivo_GuardaLaHuella()
     {
         await using var context = CreateContext();

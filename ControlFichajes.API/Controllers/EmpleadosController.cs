@@ -93,6 +93,26 @@ namespace ControlFichajes.API.Controllers
             }
         }
 
+        [HttpPatch("{id}")]
+        public async Task<IActionResult> PatchEmpleado(int id, [FromBody] EmpleadoPatchDto dto)
+        {
+            if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
+                return Forbid();
+
+            try
+            {
+                var empleadoActualizado = await _empleadoService.ActualizarAsync(id, empresaId, dto);
+                if (empleadoActualizado == null)
+                    return NotFound("Empleado no encontrado o inactivo.");
+
+                return Ok(empleadoActualizado);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteEmpleado(int id)
         {
@@ -101,7 +121,7 @@ namespace ControlFichajes.API.Controllers
 
             var resultado = await _empleadoService.BorradoLogicoAsync(id, empresaId);
             if (!resultado)
-                return NotFound("Empleado no encontrado.");
+                return NotFound("Empleado no encontrado o ya dado de baja.");
 
             return Ok(new { mensaje = "Empleado dado de baja exitosamente." });
         }

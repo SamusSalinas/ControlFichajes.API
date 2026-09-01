@@ -48,10 +48,59 @@ namespace ControlFichajes.API.Services
             return nuevoEmpleado;
         }
 
+        public async Task<Empleado?> ActualizarAsync(int id, int empresaId, EmpleadoPatchDto dto)
+        {
+            var empleado = await _context.Empleado
+                .FirstOrDefaultAsync(e => e.Id == id && e.EmpresaId == empresaId && e.Activo);
+
+            if (empleado == null)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(dto.Legajo))
+                empleado.Legajo = dto.Legajo;
+
+            if (!string.IsNullOrWhiteSpace(dto.DNI))
+            {
+                if (await _context.Empleado.AnyAsync(e => e.Id != id && e.DNI == dto.DNI))
+                    throw new Exception("El DNI ya se encuentra registrado en el sistema.");
+
+                empleado.DNI = dto.DNI;
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.CUIL))
+            {
+                if (await _context.Empleado.AnyAsync(e => e.Id != id && e.CUIL == dto.CUIL))
+                    throw new Exception("El CUIL ya se encuentra registrado en el sistema.");
+
+                empleado.CUIL = dto.CUIL;
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.Nombre))
+                empleado.Nombre = dto.Nombre;
+
+            if (!string.IsNullOrWhiteSpace(dto.Apellido))
+                empleado.Apellido = dto.Apellido;
+
+            if (dto.Departamento != null)
+                empleado.Departamento = dto.Departamento;
+
+            if (dto.Categoria != null)
+                empleado.Categoria = dto.Categoria;
+
+            if (dto.Sucursal != null)
+                empleado.Sucursal = dto.Sucursal;
+
+            if (dto.Horario != null)
+                empleado.Horario = dto.Horario;
+
+            await _context.SaveChangesAsync();
+            return empleado;
+        }
+
         public async Task<bool> BorradoLogicoAsync(int id, int empresaId)
         {
             var empleado = await _context.Empleado
-                .FirstOrDefaultAsync(e => e.Id == id && e.EmpresaId == empresaId);
+                .FirstOrDefaultAsync(e => e.Id == id && e.EmpresaId == empresaId && e.Activo);
 
             if (empleado == null)
                 return false;
