@@ -9,6 +9,7 @@ namespace ControlFichajes.API.Services
         Task<IEnumerable<Empleado>> ObtenerActivosPorEmpresaAsync(int empresaId);
         Task<Empleado?> ObtenerPorIdAsync(int id);
         Task<Empleado> CrearAsync(EmpleadoRegistroDto dto);
+        Task<Empleado?> ActualizarAsync(int id, int empresaId, EmpleadoPatchDto dto);
         Task<bool> BorradoLogicoAsync(int id, int empresaId);
 
         Task<bool> EnrolarHuellaAsync(HuellaEnrolarDto huellaDto, int empresaId);

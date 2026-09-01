@@ -88,12 +88,17 @@ GET    /api/empleados
 GET    /api/empleados/empresa/{empresaId}
 GET    /api/empleados/{id}
 POST   /api/empleados
+PATCH  /api/empleados/{id}
 POST   /api/empleados/enrolar
 DELETE /api/empleados/{id}
 GET    /api/huellas/empresa/{empresaId}
 ```
 
 El `empresa_id` incluido en el JWT limita las operaciones a la empresa correspondiente al usuario autenticado.
+
+El endpoint `PATCH /api/empleados/{id}` permite editar campos de un empleado activo, por ejemplo: legajo, DNI, CUIL, nombre, apellido, departamento, categoría, sucursal y horario. Solo se actualiza el empleado de la empresa autorizada por el token.
+
+El `DELETE /api/empleados/{id}` realiza un soft delete: marca al empleado como inactivo (`Activo = false`) y evita que siga apareciendo en listados activos. No existe borrado físico de la fila.
 
 El enrolamiento recibe:
 
@@ -209,6 +214,8 @@ La validación actual cubre:
 - registro de usuarios
 - login con credenciales inválidas
 - prevención de duplicados en DNI/CUIL
+- actualización de empleados activos vía PATCH
+- baja lógica (soft delete) de empleados
 - enrolamiento de huellas para empleados activos
 
 El documento OpenAPI se publica en desarrollo mediante `MapOpenApi`.
