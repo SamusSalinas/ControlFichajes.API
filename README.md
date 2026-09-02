@@ -81,6 +81,54 @@ Si ya existe algún usuario, `POST /api/auth/bootstrap` responde `409 Conflict`.
 
 En ese caso, se debe utilizar el token de un administrador para crear nuevos usuarios.
 
+## Empresas, usuarios, sucursales y departamentos
+
+### Empresas
+
+```text
+GET  /api/empresas
+POST /api/empresas
+```
+
+- `GET /api/empresas`: devuelve la empresa asociada al usuario autenticado.
+- `POST /api/empresas`: crea una nueva empresa y solo lo puede hacer un usuario con rol `ADMIN`.
+
+### Usuarios
+
+```text
+POST /api/usuarios
+```
+
+- Registra un usuario de la empresa autenticada.
+- Solo puede ejecutarlo un usuario con rol `ADMIN`.
+- Los roles permitidos son `ADMIN` y `RRHH`.
+
+### Sucursales
+
+```text
+GET    /api/sucursales
+GET    /api/sucursales/{id}
+POST   /api/sucursales
+PUT    /api/sucursales/{id}
+DELETE /api/sucursales/{id}
+```
+
+- Las sucursales están vinculadas a la empresa del usuario autenticado.
+- La relación con departamentos se incluye en los `GET` para facilitar carga del front.
+
+### Departamentos
+
+```text
+GET    /api/departamentos
+GET    /api/departamentos/{id}
+POST   /api/departamentos
+PUT    /api/departamentos/{id}
+DELETE /api/departamentos/{id}
+```
+
+- Los departamentos pertenecen a una sucursal.
+- La asociación se valida contra la empresa del usuario autenticado antes de guardar o editar.
+
 ## Empleados y huellas
 
 ```text
