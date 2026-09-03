@@ -22,8 +22,8 @@ namespace ControlFichajes.API.Data
 
             // Configuramos los campos únicos requeridos por tu modelo
             modelBuilder.Entity<Empresa>().HasIndex(e => e.CUIT).IsUnique();
-            modelBuilder.Entity<Empleado>().HasIndex(e => e.DNI).IsUnique();
-            modelBuilder.Entity<Empleado>().HasIndex(e => e.CUIL).IsUnique();
+            modelBuilder.Entity<Empleado>().HasIndex(e => new { e.EmpresaId, e.DNI }).IsUnique();
+            modelBuilder.Entity<Empleado>().HasIndex(e => new { e.EmpresaId, e.CUIL }).IsUnique();
             modelBuilder.Entity<Usuario>().HasIndex(u => u.Correo).IsUnique();
             modelBuilder.Entity<Sucursal>().HasIndex(s => new { s.Nombre, s.EmpresaId }).IsUnique();
             modelBuilder.Entity<Departamento>().HasIndex(d => new { d.Nombre, d.SucursalId }).IsUnique();

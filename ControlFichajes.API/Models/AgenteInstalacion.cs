@@ -29,4 +29,15 @@ public class AgenteInstalacion
     public bool Activo { get; set; } = true;
 
     public DateTime? UltimoHeartbeat { get; set; }
+
+    [MaxLength(50)]
+    public string? VersionApp { get; set; }
+
+    [MaxLength(100)]
+    public string? SerialLector { get; set; }
+
+    [MaxLength(50)]
+    public string? EstadoLector { get; set; }
+
+    public DateTime? UltimaSincronizacion { get; set; }
 }

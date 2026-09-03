@@ -30,6 +30,26 @@ namespace ControlFichajes.API.Services
                 .ToListAsync();
         }
 
+        public async Task<IEnumerable<EmpleadoAgenteDto>> ObtenerCatalogoAgenteAsync(int empresaId, int sucursalId)
+        {
+            return await _context.Empleado
+                .AsNoTracking()
+                .Where(e => e.EmpresaId == empresaId && e.SucursalId == sucursalId && e.Activo)
+                .Select(e => new EmpleadoAgenteDto
+                {
+                    Id = e.Id,
+                    Legajo = e.Legajo,
+                    DNI = e.DNI,
+                    CUIL = e.CUIL,
+                    Nombre = e.Nombre,
+                    Apellido = e.Apellido,
+                    DepartamentoId = e.DepartamentoId,
+                    SucursalId = e.SucursalId,
+                    TieneHuella = e.Huellas.Any()
+                })
+                .ToListAsync();
+        }
+
         public async Task<Empleado?> ObtenerPorIdAsync(int id)
         {
             return await _context.Empleado
@@ -39,6 +59,7 @@ namespace ControlFichajes.API.Services
 
         public async Task<Empleado> CrearAsync(EmpleadoRegistroDto dto)
         {
+            await ValidarRelacionesAsync(dto.EmpresaId, dto.SucursalId, dto.DepartamentoId);
             await ValidarEmpleadoNoDuplicadoAsync(dto);
 
             var nuevoEmpleado = MapearAEntidad(dto);
@@ -56,12 +77,14 @@ namespace ControlFichajes.API.Services
             if (empleado == null)
                 return null;
 
+            await ValidarRelacionesAsync(empresaId, dto.SucursalId, dto.DepartamentoId);
+
             if (!string.IsNullOrWhiteSpace(dto.Legajo))
                 empleado.Legajo = dto.Legajo;
 
             if (!string.IsNullOrWhiteSpace(dto.DNI))
             {
-                if (await _context.Empleado.AnyAsync(e => e.Id != id && e.DNI == dto.DNI))
+                if (await _context.Empleado.AnyAsync(e => e.Id != id && e.EmpresaId == empresaId && e.DNI == dto.DNI))
                     throw new Exception("El DNI ya se encuentra registrado en el sistema.");
 
                 empleado.DNI = dto.DNI;
@@ -69,7 +92,7 @@ namespace ControlFichajes.API.Services
 
             if (!string.IsNullOrWhiteSpace(dto.CUIL))
             {
-                if (await _context.Empleado.AnyAsync(e => e.Id != id && e.CUIL == dto.CUIL))
+                if (await _context.Empleado.AnyAsync(e => e.Id != id && e.EmpresaId == empresaId && e.CUIL == dto.CUIL))
                     throw new Exception("El CUIL ya se encuentra registrado en el sistema.");
 
                 empleado.CUIL = dto.CUIL;
@@ -110,10 +133,11 @@ namespace ControlFichajes.API.Services
             return true;
         }
 
-        public async Task<bool> EnrolarHuellaAsync(HuellaEnrolarDto dto, int empresaId)
+        public async Task<bool> EnrolarHuellaAsync(HuellaEnrolarDto dto, int empresaId, int? sucursalId = null)
         {
             var empleado = await _context.Empleado
-                .FirstOrDefaultAsync(e => e.Id == dto.EmpleadoId && e.EmpresaId == empresaId && e.Activo);
+                .FirstOrDefaultAsync(e => e.Id == dto.EmpleadoId && e.EmpresaId == empresaId && e.Activo &&
+                    (!sucursalId.HasValue || e.SucursalId == sucursalId));
 
             if (empleado == null || string.IsNullOrWhiteSpace(dto.TemplateHuellaBase64))
                 return false;
@@ -134,10 +158,30 @@ namespace ControlFichajes.API.Services
         private async Task ValidarEmpleadoNoDuplicadoAsync(EmpleadoRegistroDto dto)
         {
             var existe = await _context.Empleado
-                .AnyAsync(e => e.DNI == dto.DNI || e.CUIL == dto.CUIL);
+                .AnyAsync(e => e.EmpresaId == dto.EmpresaId && (e.DNI == dto.DNI || e.CUIL == dto.CUIL));
 
             if (existe)
                 throw new Exception("El DNI o CUIL ya se encuentra registrado en el sistema.");
+        }
+
+        private async Task ValidarRelacionesAsync(int empresaId, int? sucursalId, int? departamentoId)
+        {
+            if (sucursalId.HasValue && !await _context.Sucursal.AnyAsync(s => s.Id == sucursalId && s.EmpresaId == empresaId))
+                throw new Exception("La sucursal no pertenece a la empresa.");
+
+            if (departamentoId.HasValue)
+            {
+                var departamentoValido = await _context.Departamento
+                    .Where(d => d.Id == departamentoId && (!sucursalId.HasValue || d.SucursalId == sucursalId))
+                    .Join(_context.Sucursal,
+                        departamento => departamento.SucursalId,
+                        sucursal => sucursal.Id,
+                        (_, sucursal) => sucursal.EmpresaId)
+                    .AnyAsync(id => id == empresaId);
+
+                if (!departamentoValido)
+                    throw new Exception("El departamento no pertenece a la empresa o sucursal.");
+            }
         }
 
         private static Empleado MapearAEntidad(EmpleadoRegistroDto dto)
@@ -151,8 +195,10 @@ namespace ControlFichajes.API.Services
                 Nombre = dto.Nombre,
                 Apellido = dto.Apellido,
                 Departamento = dto.Departamento,
+                DepartamentoId = dto.DepartamentoId,
                 Categoria = dto.Categoria,
                 Sucursal = dto.Sucursal,
+                SucursalId = dto.SucursalId,
                 Horario = dto.Horario,
                 Activo = true
             };

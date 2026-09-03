@@ -27,7 +27,10 @@ namespace ControlFichajes.API.Controllers
                 if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
                     return Forbid();
 
-                var resultado = await _empleadoService.EnrolarHuellaAsync(huellaDto, empresaId);
+                var sucursalId = int.TryParse(User.FindFirst("sucursal_id")?.Value, out var claimSucursalId)
+                    ? claimSucursalId
+                    : (int?)null;
+                var resultado = await _empleadoService.EnrolarHuellaAsync(huellaDto, empresaId, sucursalId);
                 if (!resultado)
                     return NotFound(new { mensaje = "Empleado no encontrado." });
 
@@ -53,6 +56,17 @@ namespace ControlFichajes.API.Controllers
 
             var empleados = await _empleadoService.ObtenerActivosPorEmpresaAsync(empresaId);
             return Ok(empleados);
+        }
+
+        [HttpGet("catalogo-agente")]
+        [Authorize(Policy = "SoloAgente")]
+        public async Task<IActionResult> GetCatalogoAgente()
+        {
+            if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) ||
+                !int.TryParse(User.FindFirst("sucursal_id")?.Value, out var sucursalId))
+                return Forbid();
+
+            return Ok(await _empleadoService.ObtenerCatalogoAgenteAsync(empresaId, sucursalId));
         }
 
         [HttpGet("empresa/{empresaId:int}")]

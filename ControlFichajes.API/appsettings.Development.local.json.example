@@ -8,6 +8,9 @@
       "http://127.0.0.1:5173"
     ]
   },
+  "Jwt": {
+    "AgentExpireMinutes": 15
+  },
   "Bootstrap": {
     "Secret": "REEMPLAZAR_EN_VARIABLE_DE_ENTORNO"
   }

@@ -155,6 +155,7 @@ DELETE /api/departamentos/{id}
 GET    /api/empleados
 GET    /api/empleados/empresa/{empresaId}
 GET    /api/empleados/{id}
+GET    /api/empleados/catalogo-agente
 POST   /api/empleados
 PATCH  /api/empleados/{id}
 POST   /api/empleados/enrolar
@@ -176,6 +177,7 @@ El enrolamiento recibe:
 
 La plantilla debe ser FMD ANSI binaria serializada como Base64. No se acepta mezclarla con XML.
 El endpoint de enrolamiento solo acepta JWT de agente (`token_use=agent`). Los usuarios humanos reciben `403`.
+Los empleados pueden asociarse opcionalmente mediante `sucursalId` y `departamentoId`; el catálogo de agente solo devuelve empleados activos de su sucursal e incluye `tieneHuella`, sin enviar templates.
 
 ## Fichadas
 
@@ -210,9 +212,12 @@ GET  /api/agentes
 POST /api/agentes
 POST /api/agentes/{id}/rotar-secret
 PATCH /api/agentes/{id}/desactivar
+POST /api/agentes/{id}/heartbeat
 ```
 
-Todas estas operaciones son exclusivas de `SUPERADMIN`. La respuesta de alta o rotación contiene `clientSecret` una sola vez; solo se almacena su hash.
+La gestión (`GET`, `POST`, rotación y desactivación) es exclusiva de `SUPERADMIN`. El heartbeat es exclusivo del agente correspondiente. La respuesta de alta o rotación contiene `clientSecret` una sola vez; solo se almacena su hash.
+
+El heartbeat es exclusivo del agente cuyo `agente_id` coincide con `{id}`. Recibe opcionalmente `versionApp`, `serialLector`, `estadoLector` y `ultimaSincronizacion`. Los tokens humanos tienen un TTL de 60 minutos y los tokens de agente de 15 minutos, configurables mediante `Jwt:ExpireMinutes` y `Jwt:AgentExpireMinutes`.
 
 La API diferencia `401` (identidad o credenciales inválidas) de `403` (identidad válida sin permiso o tenant incorrecto).
 
@@ -254,12 +259,16 @@ Ejemplo de estructura:
     "Key": "REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA",
     "Issuer": "ControlFichajes.API.Local",
     "Audience": "ControlFichajes.Frontend.Local",
-    "ExpireMinutes": "60"
+    "ExpireMinutes": "60",
+    "AgentExpireMinutes": "15"
   },
   "Cors": {
     "AllowedOrigins": [
       "http://localhost:5173"
     ]
+  },
+  "Bootstrap": {
+    "Secret": "REEMPLAZAR_EN_VARIABLE_DE_ENTORNO"
   }
 }
 ```

@@ -216,6 +216,40 @@ public class EmpleadoServiceTests
     }
 
     [Fact]
+    public async Task CrearAsync_ConMismoDniEnOtraEmpresa_Permitido()
+    {
+        await using var context = CreateContext();
+        context.Empresa.Add(new Empresa
+        {
+            Id = 2,
+            NombreFantasia = "Otra Empresa",
+            RazonSocial = "Otra Empresa S.A.",
+            CUIT = "30-98765432-1"
+        });
+        context.Empleado.Add(new Empleado
+        {
+            EmpresaId = 1,
+            DNI = "12345678",
+            CUIL = "20-12345678-9",
+            Nombre = "Pepe",
+            Apellido = "García",
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        var empleado = await new EmpleadoService(context).CrearAsync(new EmpleadoRegistroDto
+        {
+            EmpresaId = 2,
+            DNI = "12345678",
+            CUIL = "20-87654321-9",
+            Nombre = "Pablo",
+            Apellido = "López"
+        });
+
+        Assert.Equal(2, empleado.EmpresaId);
+    }
+
+    [Fact]
     public async Task ActualizarAsync_ConEmpleadoActivo_ActualizaCamposPermitidos()
     {
         await using var context = CreateContext();

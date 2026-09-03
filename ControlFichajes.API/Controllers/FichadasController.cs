@@ -81,9 +81,13 @@ public class FichadasController : ControllerBase
         var empleadoIds = entrada.Select(f => f.EmpleadoId).Distinct().ToList();
         if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaIdUsuario))
             return Forbid();
+        var sucursalId = int.TryParse(User.FindFirst("sucursal_id")?.Value, out var claimSucursalId)
+            ? claimSucursalId
+            : (int?)null;
 
         var empleadosActivos = await _context.Empleado
-            .Where(e => empleadoIds.Contains(e.Id) && e.Activo && e.EmpresaId == empresaIdUsuario)
+            .Where(e => empleadoIds.Contains(e.Id) && e.Activo && e.EmpresaId == empresaIdUsuario &&
+                (!sucursalId.HasValue || e.SucursalId == sucursalId))
             .Select(e => e.Id)
             .ToListAsync();
 
