@@ -114,7 +114,8 @@ DELETE /api/sucursales/{id}
 ```
 
 - Las sucursales están vinculadas a la empresa del usuario autenticado.
-- La relación con departamentos se incluye en los `GET` para facilitar carga del front.
+- Los `GET` devuelven únicamente los datos de la sucursal (`id`, `nombre`, `empresaId` y `serialLector`).
+- Los departamentos se consultan por separado mediante `/api/departamentos`, evitando ciclos de serialización entre sucursales y departamentos.
 
 ### Departamentos
 

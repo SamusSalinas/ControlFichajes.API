@@ -1,4 +1,5 @@
 using ControlFichajes.API.Data;
+using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -19,22 +20,27 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Sucursal>>> GetSucursales()
+        public async Task<ActionResult<IEnumerable<SucursalDto>>> GetSucursales()
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
                 return Forbid();
 
             return await _context.Sucursal
                 .Where(s => s.EmpresaId == empresaId)
-                .Include(s => s.Departamentos)
+                .Select(s => new SucursalDto
+                {
+                    Id = s.Id,
+                    Nombre = s.Nombre,
+                    EmpresaId = s.EmpresaId,
+                    SerialLector = s.SerialLector
+                })
                 .ToListAsync();
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<Sucursal>> GetSucursal(int id)
+        public async Task<ActionResult<SucursalDto>> GetSucursal(int id)
         {
             var sucursal = await _context.Sucursal
-                .Include(s => s.Departamentos)
                 .FirstOrDefaultAsync(s => s.Id == id);
 
             if (sucursal == null)
@@ -43,7 +49,13 @@ namespace ControlFichajes.API.Controllers
             if (!EmpresaAccess.PerteneceAUsuario(User, sucursal.EmpresaId))
                 return Forbid();
 
-            return Ok(sucursal);
+            return Ok(new SucursalDto
+            {
+                Id = sucursal.Id,
+                Nombre = sucursal.Nombre,
+                EmpresaId = sucursal.EmpresaId,
+                SerialLector = sucursal.SerialLector
+            });
         }
 
         [HttpPost]
