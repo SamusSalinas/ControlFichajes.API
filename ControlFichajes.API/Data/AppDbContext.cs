@@ -14,6 +14,7 @@ namespace ControlFichajes.API.Data
         public DbSet<Fichada> Fichada { get; set; }
         public DbSet<Sucursal> Sucursal { get; set; }
         public DbSet<Departamento> Departamento { get; set; }
+        public DbSet<AgenteInstalacion> AgenteInstalacion { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -26,6 +27,7 @@ namespace ControlFichajes.API.Data
             modelBuilder.Entity<Usuario>().HasIndex(u => u.Correo).IsUnique();
             modelBuilder.Entity<Sucursal>().HasIndex(s => new { s.Nombre, s.EmpresaId }).IsUnique();
             modelBuilder.Entity<Departamento>().HasIndex(d => new { d.Nombre, d.SucursalId }).IsUnique();
+            modelBuilder.Entity<AgenteInstalacion>().HasIndex(a => a.ClientId).IsUnique();
         }
     }
 }

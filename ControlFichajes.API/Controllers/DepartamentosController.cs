@@ -19,6 +19,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet]
+        [Authorize(Policy = "LeeEmpresa")]
         public async Task<ActionResult<IEnumerable<Departamento>>> GetDepartamentos()
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
@@ -31,6 +32,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet("{id}")]
+        [Authorize(Policy = "LeeEmpresa")]
         public async Task<ActionResult<Departamento>> GetDepartamento(int id)
         {
             var departamento = await _context.Departamento
@@ -47,6 +49,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Policy = "EscribeEmpleados")]
         public async Task<ActionResult<Departamento>> PostDepartamento(Departamento departamento)
         {
             var sucursal = await _context.Sucursal.FirstOrDefaultAsync(s => s.Id == departamento.SucursalId);
@@ -63,6 +66,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Policy = "EscribeEmpleados")]
         public async Task<IActionResult> PutDepartamento(int id, Departamento departamento)
         {
             if (id != departamento.Id)
@@ -78,6 +82,12 @@ namespace ControlFichajes.API.Controllers
             if (departamentoDb.Sucursal == null || !EmpresaAccess.PerteneceAUsuario(User, departamentoDb.Sucursal.EmpresaId))
                 return Forbid();
 
+            var nuevaSucursal = await _context.Sucursal.FirstOrDefaultAsync(s => s.Id == departamento.SucursalId);
+            if (nuevaSucursal == null)
+                return BadRequest(new { mensaje = "La sucursal no existe." });
+            if (!EmpresaAccess.PerteneceAUsuario(User, nuevaSucursal.EmpresaId))
+                return Forbid();
+
             departamentoDb.Nombre = departamento.Nombre;
             departamentoDb.SucursalId = departamento.SucursalId;
 
@@ -86,6 +96,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy = "EscribeEmpleados")]
         public async Task<IActionResult> DeleteDepartamento(int id)
         {
             var departamento = await _context.Departamento

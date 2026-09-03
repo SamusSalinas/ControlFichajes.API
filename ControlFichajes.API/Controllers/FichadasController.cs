@@ -19,6 +19,7 @@ public class FichadasController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = "LeeEmpresa")]
     public async Task<IActionResult> GetFichadas(
         [FromQuery] int? empleadoId,
         [FromQuery] DateTime? desde,
@@ -68,6 +69,7 @@ public class FichadasController : ControllerBase
     }
 
     [HttpPost("bulk")]
+    [Authorize(Policy = "SoloAgente")]
     public async Task<IActionResult> PostBulk([FromBody] IEnumerable<Fichada> fichadas)
     {
         var entrada = fichadas?.ToList() ?? [];

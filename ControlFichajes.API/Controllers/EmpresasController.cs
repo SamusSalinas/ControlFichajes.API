@@ -9,7 +9,7 @@ namespace ControlFichajes.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize] // Protegido por JWT
+    [Authorize]
     public class EmpresasController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -20,6 +20,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet]
+        [Authorize(Policy = "LeeEmpresa")]
         public async Task<ActionResult<IEnumerable<Empresa>>> GetEmpresas()
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
@@ -29,6 +30,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Policy = "SoloSuperadmin")]
         public async Task<ActionResult<Empresa>> PostEmpresa(Empresa empresa)
         {
             if (!User.IsInRole("ADMIN"))

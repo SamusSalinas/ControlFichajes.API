@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
@@ -89,6 +90,79 @@ public class AuthServiceTests
         });
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task RegistrarUsuarioAsync_Superadmin_NoEmiteTenant()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        var result = await service.RegistrarUsuarioAsync(new UsuarioRegistroDto
+        {
+            NombreUsuario = "Plataforma",
+            Email = "superadmin@empresa.com",
+            Password = "Password123!",
+            Rol = "SUPERADMIN"
+        }, bootstrap: true);
+
+        Assert.NotNull(result);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(result!.Token);
+        Assert.Equal("SUPERADMIN", token.Claims.Single(c => c.Type is "role" or System.Security.Claims.ClaimTypes.Role).Value);
+        Assert.DoesNotContain(token.Claims, c => c.Type == "empresa_id");
+    }
+
+    [Fact]
+    public async Task LoginAsync_UsuarioInactivo_RetornaNull()
+    {
+        await using var context = CreateContext();
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "Inactivo",
+            Correo = "inactivo@empresa.com",
+            Rol = "RRHH",
+            Activo = false
+        };
+        usuario.PasswordHash = new PasswordHasher<Usuario>().HashPassword(usuario, "Password123!");
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var result = await CreateService(context).LoginAsync(new LoginRequestDto
+        {
+            Email = usuario.Correo,
+            Password = "Password123!"
+        });
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task LoginAgenteAsync_EmiteClaimsDeServicio()
+    {
+        await using var context = CreateContext();
+        context.Sucursal.Add(new Sucursal { Id = 2, EmpresaId = 1, Nombre = "Central", SerialLector = "SERIAL-1" });
+        await context.SaveChangesAsync();
+        var service = CreateService(context);
+
+        var agente = await service.CrearAgenteAsync(new AgenteCrearDto
+        {
+            EmpresaId = 1,
+            SucursalId = 2,
+            ClientId = "agente-test"
+        });
+        var result = await service.LoginAgenteAsync(new AgenteLoginDto
+        {
+            ClientId = agente!.ClientId,
+            ClientSecret = agente.ClientSecret
+        });
+
+        Assert.NotNull(result);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(result!.Token);
+        Assert.Equal("agent", token.Claims.Single(c => c.Type == "token_use").Value);
+        Assert.Equal("1", token.Claims.Single(c => c.Type == "empresa_id").Value);
+        Assert.Equal("2", token.Claims.Single(c => c.Type == "sucursal_id").Value);
+        Assert.Equal(agente.Id.ToString(), token.Claims.Single(c => c.Type == "agente_id").Value);
     }
 }
 
