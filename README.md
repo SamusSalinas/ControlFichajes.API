@@ -106,7 +106,7 @@ GET  /api/empresas
 POST /api/empresas
 ```
 
-- `GET /api/empresas`: devuelve la empresa del usuario; `SUPERADMIN` usa `X-Empresa-Id`.
+- `GET /api/empresas`: `ADMIN`/`RRHH` reciben su empresa; `SUPERADMIN` recibe todas sin header y puede filtrar una con `X-Empresa-Id`.
 - `POST /api/empresas`: solo lo puede ejecutar `SUPERADMIN`.
 
 ### Usuarios
