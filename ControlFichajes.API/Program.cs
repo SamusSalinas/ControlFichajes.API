@@ -1,4 +1,5 @@
 using ControlFichajes.API.Data;
+using ControlFichajes.API.Constants;
 using ControlFichajes.API.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -44,6 +45,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IEmpleadoService, EmpleadoService>();
 builder.Services.AddScoped<IPasswordHasher<Usuario>, PasswordHasher<Usuario>>();
+builder.Services.AddScoped<IPasswordHasher<AgenteInstalacion>, PasswordHasher<AgenteInstalacion>>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -61,6 +63,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("SoloSuperadmin", policy =>
+        policy.RequireRole(AppRoles.Superadmin));
+    options.AddPolicy("UsuariosEmpresa", policy =>
+        policy.RequireRole(AppRoles.Superadmin, AppRoles.Admin));
+    options.AddPolicy("EscribeEmpleados", policy =>
+        policy.RequireRole(AppRoles.Superadmin, AppRoles.Admin, AppRoles.Rrhh));
+    options.AddPolicy("LeeEmpresa", policy =>
+        policy.RequireRole(AppRoles.Superadmin, AppRoles.Admin, AppRoles.Rrhh));
+    options.AddPolicy("SoloAgente", policy =>
+        policy.RequireClaim("token_use", "agent"));
+});
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -73,6 +89,17 @@ app.UseCors("PermitirFrontend");
 
 // 4. Agregar middlewares de autenticación y autorización (el ORDEN es vital)
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    if (context.User.IsInRole(AppRoles.Superadmin) &&
+        context.Request.Headers.TryGetValue("X-Empresa-Id", out var empresaHeader) &&
+        int.TryParse(empresaHeader, out _))
+    {
+        var identity = context.User.Identity as System.Security.Claims.ClaimsIdentity;
+        identity?.AddClaim(new System.Security.Claims.Claim("empresa_id", empresaHeader!));
+    }
+    await next();
+});
 app.UseAuthorization();
 
 app.MapControllers();

@@ -8,8 +8,7 @@ namespace ControlFichajes.API.Models
         [Key]
         public int Id { get; set; }
 
-        [Required]
-        public int EmpresaId { get; set; }
+        public int? EmpresaId { get; set; }
         [ForeignKey("EmpresaId")]
         public virtual Empresa? Empresa { get; set; }
 
@@ -29,5 +28,7 @@ namespace ControlFichajes.API.Models
         [Required]
         [MaxLength(20)]
         public string Rol { get; set; } = "RRHH";
+
+        public bool Activo { get; set; } = true;
     }
 }

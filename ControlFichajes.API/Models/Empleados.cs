@@ -35,11 +35,21 @@ namespace ControlFichajes.API.Models
         [MaxLength(50)]
         public string? Departamento { get; set; }
 
+        public int? DepartamentoId { get; set; }
+
+        [ForeignKey(nameof(DepartamentoId))]
+        public virtual Departamento? DepartamentoEntidad { get; set; }
+
         [MaxLength(50)]
         public string? Categoria { get; set; }
 
         [MaxLength(50)]
         public string? Sucursal { get; set; }
+
+        public int? SucursalId { get; set; }
+
+        [ForeignKey(nameof(SucursalId))]
+        public virtual Sucursal? SucursalEntidad { get; set; }
 
         [MaxLength(50)]
         public string? Horario { get; set; }

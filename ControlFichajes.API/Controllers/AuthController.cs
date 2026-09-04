@@ -2,6 +2,8 @@ using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ControlFichajes.API.Controllers
 {
@@ -10,10 +12,12 @@ namespace ControlFichajes.API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, IConfiguration configuration)
         {
             _authService = authService;
+            _configuration = configuration;
         }
 
         [HttpPost("Login")]
@@ -29,10 +33,30 @@ namespace ControlFichajes.API.Controllers
              return Ok(response);
         }
 
+        [HttpPost("agente")]
+        [AllowAnonymous]
+        public async Task<IActionResult> LoginAgente([FromBody] AgenteLoginDto request)
+        {
+            var response = await _authService.LoginAgenteAsync(request);
+            return response == null
+                ? Unauthorized(new { mensaje = "Credenciales de agente incorrectas" })
+                : Ok(response);
+        }
+
         [HttpPost("bootstrap")]
         [AllowAnonymous]
-        public async Task<IActionResult> Bootstrap(UsuarioRegistroDto request)
+        public async Task<IActionResult> Bootstrap(UsuarioRegistroDto request, [FromHeader(Name = "X-Bootstrap-Secret")] string? bootstrapSecret)
         {
+            var configuredSecret = _configuration["Bootstrap:Secret"];
+            if (string.IsNullOrWhiteSpace(configuredSecret) || string.IsNullOrWhiteSpace(bootstrapSecret))
+                return Unauthorized(new { mensaje = "Bootstrap no habilitado." });
+
+            var configuredSecretBytes = Encoding.UTF8.GetBytes(configuredSecret);
+            var bootstrapSecretBytes = Encoding.UTF8.GetBytes(bootstrapSecret);
+            if (configuredSecretBytes.Length != bootstrapSecretBytes.Length ||
+                !CryptographicOperations.FixedTimeEquals(configuredSecretBytes, bootstrapSecretBytes))
+                return Unauthorized(new { mensaje = "Bootstrap no habilitado." });
+
             var response = await _authService.RegistrarUsuarioAsync(request, bootstrap: true);
             if (response == null)
                 return Conflict(new { mensaje = "El registro inicial ya fue realizado o los datos no son válidos." });

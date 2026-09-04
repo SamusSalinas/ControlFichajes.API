@@ -19,6 +19,7 @@ public class FichadasController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = "LeeEmpresa")]
     public async Task<IActionResult> GetFichadas(
         [FromQuery] int? empleadoId,
         [FromQuery] DateTime? desde,
@@ -68,6 +69,7 @@ public class FichadasController : ControllerBase
     }
 
     [HttpPost("bulk")]
+    [Authorize(Policy = "SoloAgente")]
     public async Task<IActionResult> PostBulk([FromBody] IEnumerable<Fichada> fichadas)
     {
         var entrada = fichadas?.ToList() ?? [];
@@ -79,9 +81,13 @@ public class FichadasController : ControllerBase
         var empleadoIds = entrada.Select(f => f.EmpleadoId).Distinct().ToList();
         if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaIdUsuario))
             return Forbid();
+        var sucursalId = int.TryParse(User.FindFirst("sucursal_id")?.Value, out var claimSucursalId)
+            ? claimSucursalId
+            : (int?)null;
 
         var empleadosActivos = await _context.Empleado
-            .Where(e => empleadoIds.Contains(e.Id) && e.Activo && e.EmpresaId == empresaIdUsuario)
+            .Where(e => empleadoIds.Contains(e.Id) && e.Activo && e.EmpresaId == empresaIdUsuario &&
+                (!sucursalId.HasValue || e.SucursalId == sucursalId))
             .Select(e => e.Id)
             .ToListAsync();
 

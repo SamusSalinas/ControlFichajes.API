@@ -20,6 +20,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet]
+        [Authorize(Policy = "LeeEmpresa")]
         public async Task<ActionResult<IEnumerable<SucursalDto>>> GetSucursales()
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
@@ -38,6 +39,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet("{id}")]
+        [Authorize(Policy = "LeeEmpresa")]
         public async Task<ActionResult<SucursalDto>> GetSucursal(int id)
         {
             var sucursal = await _context.Sucursal
@@ -59,6 +61,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Policy = "SoloSuperadmin")]
         public async Task<ActionResult<Sucursal>> PostSucursal(Sucursal sucursal)
         {
             if (!EmpresaAccess.PerteneceAUsuario(User, sucursal.EmpresaId))
@@ -71,6 +74,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Policy = "SoloSuperadmin")]
         public async Task<IActionResult> PutSucursal(int id, Sucursal sucursal)
         {
             if (id != sucursal.Id)
@@ -95,6 +99,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy = "SoloSuperadmin")]
         public async Task<IActionResult> DeleteSucursal(int id)
         {
             var sucursal = await _context.Sucursal.FirstOrDefaultAsync(s => s.Id == id);

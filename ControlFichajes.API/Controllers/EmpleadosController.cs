@@ -19,6 +19,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost("enrolar")]
+        [Authorize(Policy = "SoloAgente")]
         public async Task<IActionResult> EnrolarEmpleado([FromBody] HuellaEnrolarDto huellaDto)
         {
             try
@@ -26,7 +27,10 @@ namespace ControlFichajes.API.Controllers
                 if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
                     return Forbid();
 
-                var resultado = await _empleadoService.EnrolarHuellaAsync(huellaDto, empresaId);
+                var sucursalId = int.TryParse(User.FindFirst("sucursal_id")?.Value, out var claimSucursalId)
+                    ? claimSucursalId
+                    : (int?)null;
+                var resultado = await _empleadoService.EnrolarHuellaAsync(huellaDto, empresaId, sucursalId);
                 if (!resultado)
                     return NotFound(new { mensaje = "Empleado no encontrado." });
 
@@ -44,6 +48,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet]
+        [Authorize(Policy = "LeeEmpresa")]
         public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleados()
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
@@ -53,7 +58,19 @@ namespace ControlFichajes.API.Controllers
             return Ok(empleados);
         }
 
+        [HttpGet("catalogo-agente")]
+        [Authorize(Policy = "SoloAgente")]
+        public async Task<IActionResult> GetCatalogoAgente()
+        {
+            if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) ||
+                !int.TryParse(User.FindFirst("sucursal_id")?.Value, out var sucursalId))
+                return Forbid();
+
+            return Ok(await _empleadoService.ObtenerCatalogoAgenteAsync(empresaId, sucursalId));
+        }
+
         [HttpGet("empresa/{empresaId:int}")]
+        [Authorize(Policy = "LeeEmpresa")]
         public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleadosPorEmpresa(int empresaId)
         {
             if (!EmpresaAccess.PerteneceAUsuario(User, empresaId))
@@ -64,6 +81,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet("{id}")]
+        [Authorize(Policy = "LeeEmpresa")]
         public async Task<ActionResult<Empleado>> GetEmpleado(int id)
         {
             var empleado = await _empleadoService.ObtenerPorIdAsync(id);
@@ -77,6 +95,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Policy = "EscribeEmpleados")]
         public async Task<ActionResult<Empleado>> PostEmpleado(EmpleadoRegistroDto dto)
         {
             if (!EmpresaAccess.PerteneceAUsuario(User, dto.EmpresaId))
@@ -94,6 +113,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPatch("{id}")]
+        [Authorize(Policy = "EscribeEmpleados")]
         public async Task<IActionResult> PatchEmpleado(int id, [FromBody] EmpleadoPatchDto dto)
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
@@ -114,6 +134,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy = "EscribeEmpleados")]
         public async Task<IActionResult> DeleteEmpleado(int id)
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))

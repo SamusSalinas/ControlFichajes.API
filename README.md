@@ -12,7 +12,7 @@ El backend es la fuente de verdad del contrato que consumirán posteriormente el
 
 ## Contrato de la API
 
-Todos los endpoints siguientes, excepto el login y el registro inicial, requieren:
+Todos los endpoints protegidos requieren:
 
 ```http
 Authorization: Bearer <token>
@@ -32,28 +32,44 @@ Content-Type: application/json
 
 La respuesta contiene `token` y `mensaje`.
 
+El login humano solo autentica usuarios activos y emite un token con `token_use=web`.
+Los roles humanos son `SUPERADMIN`, `ADMIN` y `RRHH`. Un `SUPERADMIN` no recibe `empresa_id`; para operar una empresa debe enviar el header `X-Empresa-Id`.
+
+El login de una instalación de sucursal es independiente del login humano:
+
+```http
+POST /api/auth/agente
+Content-Type: application/json
+
+{
+  "clientId": "lector-central-01",
+  "clientSecret": "<secreto-de-instalacion>"
+}
+```
+
+Este endpoint devuelve un JWT de servicio con `token_use=agent`, `empresa_id`, `sucursal_id` y `agente_id`. El agente no es un `Usuario` y no puede acceder al panel web.
+
 Las contraseñas almacenadas en `Usuario.PasswordHash` deben ser hashes generados con `PasswordHasher<Usuario>`.
 
 ### Registro de usuarios
 
-El primer usuario se crea una sola vez mediante el endpoint de bootstrap.
+El primer usuario de plataforma se crea una sola vez mediante el endpoint de bootstrap.
 
-Este endpoint solo funciona cuando la tabla `Usuario` está vacía y crea un usuario con rol `ADMIN`:
+El endpoint requiere el header `X-Bootstrap-Secret`, configurado mediante `Bootstrap:Secret` en variables de entorno, solo funciona cuando `Usuario` está vacía y crea un `SUPERADMIN`:
 
 ```http
 POST /api/auth/bootstrap
+X-Bootstrap-Secret: <secreto-de-despliegue>
 Content-Type: application/json
 
 {
-    "empresaId": 1,
+    "empresaId": null,
     "nombreUsuario": "Administrador",
     "email": "admin@empresa.local",
     "password": "UnaClaveSegura123",
-    "rol": "ADMIN"
+    "rol": "SUPERADMIN"
 }
 ```
-
-La empresa indicada debe existir previamente.
 
 La respuesta devuelve un JWT, por lo que se puede reutilizar directamente como Bearer token.
 
@@ -73,13 +89,13 @@ Content-Type: application/json
 }
 ```
 
-Solo se permiten los roles `ADMIN` y `RRHH`.
+`ADMIN` puede administrar usuarios `ADMIN` y `RRHH` de su empresa. `SUPERADMIN` puede administrar usuarios de cualquier empresa. `RRHH` y los agentes reciben `403`.
 
-El administrador no puede crear usuarios para otra empresa. Las contraseñas se almacenan como hash y nunca se devuelven en la respuesta.
+El alta devuelve únicamente datos públicos, sin `token` ni `PasswordHash`. Las contraseñas se almacenan como hash y nunca se devuelven en la respuesta. `PATCH /api/usuarios/{id}` permite modificar nombre, rol y `Activo`; desactivar un usuario impide su login y devuelve `401`.
 
 Si ya existe algún usuario, `POST /api/auth/bootstrap` responde `409 Conflict`.
 
-En ese caso, se debe utilizar el token de un administrador para crear nuevos usuarios.
+En ese caso, se debe utilizar el token de un administrador o SUPERADMIN para crear nuevos usuarios.
 
 ## Empresas, usuarios, sucursales y departamentos
 
@@ -90,18 +106,20 @@ GET  /api/empresas
 POST /api/empresas
 ```
 
-- `GET /api/empresas`: devuelve la empresa asociada al usuario autenticado.
-- `POST /api/empresas`: crea una nueva empresa y solo lo puede hacer un usuario con rol `ADMIN`.
+- `GET /api/empresas`: `ADMIN`/`RRHH` reciben su empresa; `SUPERADMIN` recibe todas sin header y puede filtrar una con `X-Empresa-Id`.
+- `POST /api/empresas`: solo lo puede ejecutar `SUPERADMIN`.
 
 ### Usuarios
 
 ```text
 POST /api/usuarios
+GET   /api/usuarios
+PATCH /api/usuarios/{id}
 ```
 
 - Registra un usuario de la empresa autenticada.
-- Solo puede ejecutarlo un usuario con rol `ADMIN`.
-- Los roles permitidos son `ADMIN` y `RRHH`.
+- `ADMIN` y `SUPERADMIN` pueden administrarlos según su alcance.
+- Los roles humanos permitidos son `SUPERADMIN`, `ADMIN` y `RRHH`; un `ADMIN` no puede crear ni asignar `SUPERADMIN`.
 
 ### Sucursales
 
@@ -114,6 +132,7 @@ DELETE /api/sucursales/{id}
 ```
 
 - Las sucursales están vinculadas a la empresa del usuario autenticado.
+- `GET` está disponible para `SUPERADMIN`, `ADMIN` y `RRHH`; write (`POST`, `PUT`, `DELETE`) es exclusivo de `SUPERADMIN`.
 - Los `GET` devuelven únicamente los datos de la sucursal (`id`, `nombre`, `empresaId` y `serialLector`).
 - Los departamentos se consultan por separado mediante `/api/departamentos`, evitando ciclos de serialización entre sucursales y departamentos.
 
@@ -136,6 +155,7 @@ DELETE /api/departamentos/{id}
 GET    /api/empleados
 GET    /api/empleados/empresa/{empresaId}
 GET    /api/empleados/{id}
+GET    /api/empleados/catalogo-agente
 POST   /api/empleados
 PATCH  /api/empleados/{id}
 POST   /api/empleados/enrolar
@@ -156,6 +176,8 @@ El enrolamiento recibe:
 - `indiceDedo`
 
 La plantilla debe ser FMD ANSI binaria serializada como Base64. No se acepta mezclarla con XML.
+El endpoint de enrolamiento solo acepta JWT de agente (`token_use=agent`). Los usuarios humanos reciben `403`.
+Los empleados pueden asociarse opcionalmente mediante `sucursalId` y `departamentoId`; el catálogo de agente solo devuelve empleados activos de su sucursal e incluye `tieneHuella`, sin enviar templates.
 
 ## Fichadas
 
@@ -175,9 +197,29 @@ Los valores aceptados para `Metodo` son:
 - `Biométrico`
 - `Manual`
 
-El lote admite como máximo 500 elementos y únicamente empleados activos pertenecientes a la empresa indicada por el token.
+El lote admite como máximo 500 elementos y únicamente empleados activos pertenecientes a la empresa del token de agente. El bulk solo acepta JWT de agente; los usuarios humanos reciben `403`.
+
+`GET /api/fichadas` está disponible para `SUPERADMIN`, `ADMIN` y `RRHH` dentro de su contexto de empresa. Los agentes reciben `403`.
+
+`GET /api/huellas/empresa/{empresaId}` también es exclusivo del agente y no debe exponerse a usuarios humanos porque incluye plantillas biométricas.
 
 Las fechas deben enviarse en formato ISO 8601.
+
+### Agentes de sucursal
+
+```text
+GET  /api/agentes
+POST /api/agentes
+POST /api/agentes/{id}/rotar-secret
+PATCH /api/agentes/{id}/desactivar
+POST /api/agentes/{id}/heartbeat
+```
+
+La gestión (`GET`, `POST`, rotación y desactivación) es exclusiva de `SUPERADMIN`. El heartbeat es exclusivo del agente correspondiente. La respuesta de alta o rotación contiene `clientSecret` una sola vez; solo se almacena su hash.
+
+El heartbeat es exclusivo del agente cuyo `agente_id` coincide con `{id}`. Recibe opcionalmente `versionApp`, `serialLector`, `estadoLector` y `ultimaSincronizacion`. Los tokens humanos tienen un TTL de 60 minutos y los tokens de agente de 15 minutos, configurables mediante `Jwt:ExpireMinutes` y `Jwt:AgentExpireMinutes`.
+
+La API diferencia `401` (identidad o credenciales inválidas) de `403` (identidad válida sin permiso o tenant incorrecto).
 
 El endpoint `GET` devuelve:
 
@@ -217,12 +259,16 @@ Ejemplo de estructura:
     "Key": "REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA",
     "Issuer": "ControlFichajes.API.Local",
     "Audience": "ControlFichajes.Frontend.Local",
-    "ExpireMinutes": "60"
+    "ExpireMinutes": "60",
+    "AgentExpireMinutes": "15"
   },
   "Cors": {
     "AllowedOrigins": [
       "http://localhost:5173"
     ]
+  },
+  "Bootstrap": {
+    "Secret": "REEMPLAZAR_EN_VARIABLE_DE_ENTORNO"
   }
 }
 ```

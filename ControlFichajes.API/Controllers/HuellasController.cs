@@ -18,6 +18,7 @@ public class HuellasController : ControllerBase
     }
 
     [HttpGet("empresa/{empresaId:int}")]
+    [Authorize(Policy = "SoloAgente")]
     public async Task<IActionResult> GetHuellasPorEmpresa(int empresaId)
     {
         if (!EmpresaAccess.PerteneceAUsuario(User, empresaId))
