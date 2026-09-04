@@ -48,9 +48,13 @@ namespace ControlFichajes.API.Controllers
         public async Task<IActionResult> Bootstrap(UsuarioRegistroDto request, [FromHeader(Name = "X-Bootstrap-Secret")] string? bootstrapSecret)
         {
             var configuredSecret = _configuration["Bootstrap:Secret"];
-            if (string.IsNullOrWhiteSpace(configuredSecret) || string.IsNullOrWhiteSpace(bootstrapSecret) ||
-                !CryptographicOperations.FixedTimeEquals(
-                    Encoding.UTF8.GetBytes(configuredSecret), Encoding.UTF8.GetBytes(bootstrapSecret)))
+            if (string.IsNullOrWhiteSpace(configuredSecret) || string.IsNullOrWhiteSpace(bootstrapSecret))
+                return Unauthorized(new { mensaje = "Bootstrap no habilitado." });
+
+            var configuredSecretBytes = Encoding.UTF8.GetBytes(configuredSecret);
+            var bootstrapSecretBytes = Encoding.UTF8.GetBytes(bootstrapSecret);
+            if (configuredSecretBytes.Length != bootstrapSecretBytes.Length ||
+                !CryptographicOperations.FixedTimeEquals(configuredSecretBytes, bootstrapSecretBytes))
                 return Unauthorized(new { mensaje = "Bootstrap no habilitado." });
 
             var response = await _authService.RegistrarUsuarioAsync(request, bootstrap: true);

@@ -19,7 +19,6 @@ namespace ControlFichajes.API.DTOs
 
     public class UsuarioRegistroDto
     {
-        [Required]
         public int? EmpresaId { get; set; }
 
         [Required, MaxLength(50)]
