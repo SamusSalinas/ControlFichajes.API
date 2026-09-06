@@ -32,9 +32,6 @@ namespace ControlFichajes.API.Models
         [MaxLength(50)]
         public string Apellido { get; set; } = string.Empty;
 
-        [MaxLength(50)]
-        public string? Departamento { get; set; }
-
         public int? DepartamentoId { get; set; }
 
         [ForeignKey(nameof(DepartamentoId))]
@@ -42,9 +39,6 @@ namespace ControlFichajes.API.Models
 
         [MaxLength(50)]
         public string? Categoria { get; set; }
-
-        [MaxLength(50)]
-        public string? Sucursal { get; set; }
 
         public int? SucursalId { get; set; }
 

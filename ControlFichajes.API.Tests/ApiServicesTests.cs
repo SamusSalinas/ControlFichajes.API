@@ -186,6 +186,18 @@ public class EmpleadoServiceTests
         return context;
     }
 
+    private static void SeedSucursalesYDepartamentos(AppDbContext context)
+    {
+        context.Sucursal.AddRange(
+            new Sucursal { Id = 10, EmpresaId = 1, Nombre = "Central", SerialLector = "SERIAL-1" },
+            new Sucursal { Id = 11, EmpresaId = 1, Nombre = "Norte", SerialLector = "SERIAL-2" });
+        context.Departamento.AddRange(
+            new Departamento { Id = 20, SucursalId = 10, Nombre = "Ventas" },
+            new Departamento { Id = 21, SucursalId = 10, Nombre = "Administración" },
+            new Departamento { Id = 22, SucursalId = 11, Nombre = "Depósito" });
+        context.SaveChanges();
+    }
+
     [Fact]
     public async Task CrearAsync_ConDniDuplicado_LanzaExcepcion()
     {
@@ -263,9 +275,7 @@ public class EmpleadoServiceTests
             CUIL = "20-87654321-9",
             Nombre = "María",
             Apellido = "Pérez",
-            Departamento = "Ventas",
             Categoria = "Operario",
-            Sucursal = "Central",
             Horario = "Turno A",
             Activo = true
         });
@@ -274,18 +284,225 @@ public class EmpleadoServiceTests
         var actualizado = await service.ActualizarAsync(10, 1, new EmpleadoPatchDto
         {
             Nombre = "María Elena",
-            Departamento = "Administración",
             Categoria = "Analista",
-            Sucursal = "Norte",
             Horario = "Turno B"
         });
 
         Assert.NotNull(actualizado);
         Assert.Equal("María Elena", actualizado!.Nombre);
-        Assert.Equal("Administración", actualizado.Departamento);
         Assert.Equal("Analista", actualizado.Categoria);
-        Assert.Equal("Norte", actualizado.Sucursal);
         Assert.Equal("Turno B", actualizado.Horario);
+    }
+
+    [Fact]
+    public async Task ObtenerActivosPorEmpresaAsync_DevuelveNombresPorRelacionSinColumnasLegacy()
+    {
+        await using var context = CreateContext();
+        SeedSucursalesYDepartamentos(context);
+        context.Empleado.Add(new Empleado
+        {
+            Id = 30,
+            EmpresaId = 1,
+            DNI = "22222222",
+            CUIL = "20-22222222-9",
+            Nombre = "Ana",
+            Apellido = "López",
+            SucursalId = 10,
+            DepartamentoId = 20,
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        var listado = (await new EmpleadoService(context).ObtenerActivosPorEmpresaAsync(1)).ToList();
+
+        var empleado = Assert.Single(listado);
+        Assert.Equal(10, empleado.SucursalId);
+        Assert.Equal("Central", empleado.Sucursal);
+        Assert.Equal(20, empleado.DepartamentoId);
+        Assert.Equal("Ventas", empleado.Departamento);
+        Assert.Null(empleado.GetType().GetProperty("Huellas"));
+    }
+
+    [Fact]
+    public async Task ObtenerActivosPorEmpresaAsync_NoMezclaEmpleadosDeOtraEmpresa()
+    {
+        await using var context = CreateContext();
+        context.Empresa.Add(new Empresa
+        {
+            Id = 2,
+            NombreFantasia = "Otra",
+            RazonSocial = "Otra S.A.",
+            CUIT = "30-11111111-1"
+        });
+        context.Sucursal.AddRange(
+            new Sucursal { Id = 10, EmpresaId = 1, Nombre = "Central", SerialLector = "A" },
+            new Sucursal { Id = 40, EmpresaId = 2, Nombre = "Central", SerialLector = "B" });
+        context.Empleado.AddRange(
+            new Empleado { Id = 1, EmpresaId = 1, DNI = "1", CUIL = "1", Nombre = "Uno", Apellido = "A", SucursalId = 10, Activo = true },
+            new Empleado { Id = 2, EmpresaId = 2, DNI = "2", CUIL = "2", Nombre = "Dos", Apellido = "B", SucursalId = 40, Activo = true });
+        await context.SaveChangesAsync();
+
+        var listado = (await new EmpleadoService(context).ObtenerActivosPorEmpresaAsync(1)).ToList();
+
+        var empleado = Assert.Single(listado);
+        Assert.Equal(1, empleado.EmpresaId);
+        Assert.Equal("Uno", empleado.Nombre);
+    }
+
+    [Fact]
+    public async Task ActualizarAsync_PersisteSucursalIdYDepartamentoId()
+    {
+        await using var context = CreateContext();
+        SeedSucursalesYDepartamentos(context);
+        context.Empleado.Add(new Empleado
+        {
+            Id = 10,
+            EmpresaId = 1,
+            DNI = "87654321",
+            CUIL = "20-87654321-9",
+            Nombre = "María",
+            Apellido = "Pérez",
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        var actualizado = await new EmpleadoService(context).ActualizarAsync(10, 1, new EmpleadoPatchDto
+        {
+            SucursalId = 10,
+            DepartamentoId = 20
+        });
+
+        Assert.NotNull(actualizado);
+        Assert.Equal(10, actualizado!.SucursalId);
+        Assert.Equal("Central", actualizado.Sucursal);
+        Assert.Equal(20, actualizado.DepartamentoId);
+        Assert.Equal("Ventas", actualizado.Departamento);
+
+        var persistido = await context.Empleado.AsNoTracking().FirstAsync(e => e.Id == 10);
+        Assert.Equal(10, persistido.SucursalId);
+        Assert.Equal(20, persistido.DepartamentoId);
+    }
+
+    [Fact]
+    public async Task ActualizarAsync_NoModificaIdsCuandoNoVienenEnElDto()
+    {
+        await using var context = CreateContext();
+        SeedSucursalesYDepartamentos(context);
+        context.Empleado.Add(new Empleado
+        {
+            Id = 10,
+            EmpresaId = 1,
+            DNI = "87654321",
+            CUIL = "20-87654321-9",
+            Nombre = "María",
+            Apellido = "Pérez",
+            SucursalId = 10,
+            DepartamentoId = 20,
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        var actualizado = await new EmpleadoService(context).ActualizarAsync(10, 1, new EmpleadoPatchDto
+        {
+            Nombre = "María Elena"
+        });
+
+        Assert.Equal(10, actualizado!.SucursalId);
+        Assert.Equal(20, actualizado.DepartamentoId);
+        Assert.Equal("Central", actualizado.Sucursal);
+    }
+
+    [Fact]
+    public async Task ActualizarAsync_ConSucursalDeOtraEmpresa_LanzaExcepcion()
+    {
+        await using var context = CreateContext();
+        SeedSucursalesYDepartamentos(context);
+        context.Empresa.Add(new Empresa
+        {
+            Id = 2,
+            NombreFantasia = "Otra",
+            RazonSocial = "Otra S.A.",
+            CUIT = "30-22222222-2"
+        });
+        context.Sucursal.Add(new Sucursal { Id = 99, EmpresaId = 2, Nombre = "Ajena", SerialLector = "X" });
+        context.Empleado.Add(new Empleado
+        {
+            Id = 10,
+            EmpresaId = 1,
+            DNI = "87654321",
+            CUIL = "20-87654321-9",
+            Nombre = "María",
+            Apellido = "Pérez",
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        var exception = await Assert.ThrowsAsync<Exception>(() => new EmpleadoService(context).ActualizarAsync(10, 1, new EmpleadoPatchDto
+        {
+            SucursalId = 99
+        }));
+
+        Assert.Contains("sucursal no pertenece", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var persistido = await context.Empleado.AsNoTracking().FirstAsync(e => e.Id == 10);
+        Assert.Null(persistido.SucursalId);
+    }
+
+    [Fact]
+    public async Task ActualizarAsync_ConDepartamentoDeOtraEmpresa_LanzaExcepcion()
+    {
+        await using var context = CreateContext();
+        SeedSucursalesYDepartamentos(context);
+        context.Empresa.Add(new Empresa
+        {
+            Id = 2,
+            NombreFantasia = "Otra",
+            RazonSocial = "Otra S.A.",
+            CUIT = "30-33333333-3"
+        });
+        context.Sucursal.Add(new Sucursal { Id = 99, EmpresaId = 2, Nombre = "Ajena", SerialLector = "X" });
+        context.Departamento.Add(new Departamento { Id = 77, SucursalId = 99, Nombre = "Externo" });
+        context.Empleado.Add(new Empleado
+        {
+            Id = 10,
+            EmpresaId = 1,
+            DNI = "87654321",
+            CUIL = "20-87654321-9",
+            Nombre = "María",
+            Apellido = "Pérez",
+            SucursalId = 10,
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        var exception = await Assert.ThrowsAsync<Exception>(() => new EmpleadoService(context).ActualizarAsync(10, 1, new EmpleadoPatchDto
+        {
+            DepartamentoId = 77
+        }));
+
+        Assert.Contains("departamento no pertenece", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CrearAsync_ResuelveNombresLegacyAIdsDeLaMismaEmpresa()
+    {
+        await using var context = CreateContext();
+        SeedSucursalesYDepartamentos(context);
+
+        var creado = await new EmpleadoService(context).CrearAsync(new EmpleadoRegistroDto
+        {
+            EmpresaId = 1,
+            DNI = "33333333",
+            CUIL = "20-33333333-9",
+            Nombre = "Luis",
+            Apellido = "Gómez",
+            Sucursal = "Central",
+            Departamento = "Ventas"
+        });
+
+        Assert.Equal(10, creado.SucursalId);
+        Assert.Equal("Central", creado.Sucursal);
+        Assert.Equal(20, creado.DepartamentoId);
+        Assert.Equal("Ventas", creado.Departamento);
     }
 
     [Fact]

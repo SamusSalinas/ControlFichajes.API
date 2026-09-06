@@ -165,7 +165,7 @@ GET    /api/huellas/empresa/{empresaId}
 
 El `empresa_id` incluido en el JWT limita las operaciones a la empresa correspondiente al usuario autenticado.
 
-El endpoint `PATCH /api/empleados/{id}` permite editar campos de un empleado activo, por ejemplo: legajo, DNI, CUIL, nombre, apellido, departamento, categoría, sucursal y horario. Solo se actualiza el empleado de la empresa autorizada por el token.
+El endpoint `PATCH /api/empleados/{id}` permite editar campos de un empleado activo (legajo, DNI, CUIL, nombre, apellido, categoría, horario y asociación a sucursal/departamento). El detalle de persistencia por Id y la compatibilidad temporal con nombres está documentado en la sección de prueba técnica.
 
 El `DELETE /api/empleados/{id}` realiza un soft delete: marca al empleado como inactivo (`Activo = false`) y evita que siga apareciendo en listados activos. No existe borrado físico de la fila.
 
@@ -178,6 +178,67 @@ El enrolamiento recibe:
 La plantilla debe ser FMD ANSI binaria serializada como Base64. No se acepta mezclarla con XML.
 El endpoint de enrolamiento solo acepta JWT de agente (`token_use=agent`). Los usuarios humanos reciben `403`.
 Los empleados pueden asociarse opcionalmente mediante `sucursalId` y `departamentoId`; el catálogo de agente solo devuelve empleados activos de su sucursal e incluye `tieneHuella`, sin enviar templates.
+
+## Prueba técnica - compatibilidad del modelo Empleado
+
+Esta rama prueba una alternativa para `GET /api/empleados` frente al error:
+
+```text
+Unknown column 'e.Departamento' in 'field list'
+```
+
+La prueba se limita a alinear el mapeo EF con las columnas reales (`DepartamentoId`, `SucursalId`), sin modificar la base productiva ni aplicar migraciones.
+
+### Antes
+
+| Campo | API esperaba | BD real |
+|---|---|---|
+| `Departamento` | Sí | No |
+| `DepartamentoId` | Sí | Sí |
+| `Sucursal` | Sí | No |
+| `SucursalId` | Sí | Sí |
+
+### Ahora
+
+| Dato | Origen |
+|---|---|
+| `departamento` | `DepartamentoEntidad.Nombre` |
+| `departamentoId` | `Empleado.DepartamentoId` |
+| `sucursal` | `SucursalEntidad.Nombre` |
+| `sucursalId` | `Empleado.SucursalId` |
+
+### Propósito del cambio
+
+Se propone, para revisión:
+
+- evitar que EF consulte columnas que no existen;
+- mantener compatibilidad de lectura con el frontend;
+- usar las relaciones reales por Id;
+- validar esta alternativa antes de decidir si se integra.
+
+### Qué no modifica
+
+| Área | ¿Cambia? |
+|---|---|
+| Auth | no |
+| Roles | no |
+| Multiempresa | no |
+| Agente | no |
+| Migraciones | no |
+| Base productiva | no |
+| `main` | no |
+| `implementar-requerimientos` | no |
+
+### Estado de prueba
+
+| Check | Resultado |
+|---|---|
+| Build | PASS |
+| Tests | 18/18 PASS |
+
+Esta rama se publica únicamente como prueba técnica para revisión.
+No implica una modificación definitiva de la implementación existente
+ni aplica cambios sobre las ramas oficiales.
 
 ## Fichadas
 
@@ -310,6 +371,9 @@ La validación actual cubre:
 - login con credenciales inválidas
 - prevención de duplicados en DNI/CUIL
 - actualización de empleados activos vía PATCH
+- persistencia de `SucursalId` / `DepartamentoId` en PATCH
+- rechazo de relaciones de otra empresa
+- proyección de nombres de sucursal/departamento por relación
 - baja lógica (soft delete) de empleados
 - enrolamiento de huellas para empleados activos
 
