@@ -22,8 +22,10 @@ namespace ControlFichajes.API.DTOs
         public string Apellido { get; set; } = string.Empty;
 
         public string? Departamento { get; set; }
+        public int? DepartamentoId { get; set; }
         public string? Categoria { get; set; }
         public string? Sucursal { get; set; }
+        public int? SucursalId { get; set; }
         public string? Horario { get; set; }
     }
 }

@@ -1,9 +1,16 @@
 using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using ControlFichajes.API.Constants;
+using ControlFichajes.API.Controllers;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
@@ -90,6 +97,204 @@ public class AuthServiceTests
 
         Assert.Null(result);
     }
+
+    [Theory]
+    [InlineData("SuperAdmin")]
+    [InlineData("SUPERADMIN")]
+    public async Task LoginAsync_SuperAdmin_NormalizaRolYOmiteEmpresa(string rolGuardado)
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "Super Admin",
+            Correo = "superadmin@empresa.com",
+            Rol = rolGuardado
+        };
+        usuario.PasswordHash = new PasswordHasher<Usuario>()
+            .HashPassword(usuario, "Password123!");
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var result = await service.LoginAsync(new LoginRequestDto
+        {
+            Email = usuario.Correo,
+            Password = "Password123!"
+        });
+
+        Assert.NotNull(result);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(result!.Token);
+        Assert.Equal(
+            AppRoles.SuperAdmin,
+            token.Claims.Single(c => c.Type is "role" or ClaimTypes.Role).Value);
+        Assert.Equal("web", token.Claims.Single(c => c.Type == "token_use").Value);
+        Assert.DoesNotContain(token.Claims, c => c.Type == "empresa_id");
+    }
+
+    [Theory]
+    [InlineData("ADMIN")]
+    [InlineData("RRHH")]
+    public async Task LoginAsync_UsuarioDeEmpresa_MantieneEmpresaEnJwt(string rol)
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = rol,
+            Correo = $"{rol.ToLowerInvariant()}@empresa.com",
+            Rol = rol
+        };
+        usuario.PasswordHash = new PasswordHasher<Usuario>()
+            .HashPassword(usuario, "Password123!");
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var result = await service.LoginAsync(new LoginRequestDto
+        {
+            Email = usuario.Correo,
+            Password = "Password123!"
+        });
+
+        Assert.NotNull(result);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(result!.Token);
+        Assert.Equal("web", token.Claims.Single(c => c.Type == "token_use").Value);
+        Assert.Equal("1", token.Claims.Single(c => c.Type == "empresa_id").Value);
+    }
+}
+
+public class EmpresaAccessTests
+{
+    private static ClaimsPrincipal CrearUsuario(string rol, int? empresaId = null)
+    {
+        var claims = new List<Claim> { new(ClaimTypes.Role, rol) };
+        if (empresaId.HasValue)
+            claims.Add(new Claim("empresa_id", empresaId.Value.ToString()));
+
+        return new ClaimsPrincipal(new ClaimsIdentity(
+            claims,
+            authenticationType: "Test",
+            nameType: ClaimTypes.Name,
+            roleType: ClaimTypes.Role));
+    }
+
+    private static AppDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        var context = new AppDbContext(options);
+        context.Empresa.AddRange(
+            new Empresa
+            {
+                Id = 1,
+                NombreFantasia = "Empresa Uno",
+                RazonSocial = "Empresa Uno S.A.",
+                CUIT = "30-11111111-1"
+            },
+            new Empresa
+            {
+                Id = 2,
+                NombreFantasia = "Empresa Dos",
+                RazonSocial = "Empresa Dos S.A.",
+                CUIT = "30-22222222-2"
+            });
+        context.SaveChanges();
+        return context;
+    }
+
+    [Fact]
+    public void ApplyEmpresaContext_SuperAdminUsaHeaderYDescartaEmpresaDelToken()
+    {
+        var user = CrearUsuario(AppRoles.SuperAdmin, empresaId: 1);
+        var headers = new HeaderDictionary { ["X-Empresa-Id"] = "2" };
+
+        EmpresaAccess.ApplyEmpresaContext(user, headers);
+
+        Assert.True(EmpresaAccess.TryGetEmpresaId(user, out var empresaId));
+        Assert.Equal(2, empresaId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("invalido")]
+    [InlineData("0")]
+    public void ApplyEmpresaContext_SuperAdminSinHeaderValidoQuedaSinContexto(string? header)
+    {
+        var user = CrearUsuario("SUPERADMIN", empresaId: 1);
+        var headers = new HeaderDictionary();
+        if (header is not null)
+            headers["X-Empresa-Id"] = header;
+
+        EmpresaAccess.ApplyEmpresaContext(user, headers);
+
+        Assert.False(EmpresaAccess.TryGetEmpresaId(user, out _));
+    }
+
+    [Fact]
+    public void ApplyEmpresaContext_AdminIgnoraHeaderDeOtraEmpresa()
+    {
+        var user = CrearUsuario(AppRoles.Admin, empresaId: 1);
+        var headers = new HeaderDictionary { ["X-Empresa-Id"] = "2" };
+
+        EmpresaAccess.ApplyEmpresaContext(user, headers);
+
+        Assert.True(EmpresaAccess.TryGetEmpresaId(user, out var empresaId));
+        Assert.Equal(1, empresaId);
+        Assert.False(EmpresaAccess.PerteneceAUsuario(user, 2));
+    }
+
+    [Fact]
+    public async Task GetEmpresas_SuperAdminDevuelveTodasSinHeader()
+    {
+        await using var context = CreateContext();
+        var controller = new EmpresasController(context)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = CrearUsuario(AppRoles.SuperAdmin)
+                }
+            }
+        };
+
+        var result = await controller.GetEmpresas();
+
+        Assert.Equal(2, result.Value!.Count());
+    }
+
+    [Fact]
+    public async Task GetEmpresas_AdminDevuelveSoloSuEmpresa()
+    {
+        await using var context = CreateContext();
+        var controller = new EmpresasController(context)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = CrearUsuario(AppRoles.Admin, empresaId: 1)
+                }
+            }
+        };
+
+        var result = await controller.GetEmpresas();
+
+        var empresa = Assert.Single(result.Value!);
+        Assert.Equal(1, empresa.Id);
+    }
+
+    [Fact]
+    public void EmpresasController_RequiereAutenticacion()
+    {
+        Assert.Contains(
+            typeof(EmpresasController).GetCustomAttributes(inherit: true),
+            attribute => attribute is AuthorizeAttribute);
+    }
 }
 
 public class EmpleadoServiceTests
@@ -110,6 +315,21 @@ public class EmpleadoServiceTests
         });
         context.SaveChanges();
         return context;
+    }
+
+    [Fact]
+    public void ModeloEmpleado_MapeaRelacionesPorIdSinColumnasDeNombre()
+    {
+        using var context = CreateContext();
+        var modelo = context.Model.FindEntityType(typeof(Empleado));
+
+        Assert.NotNull(modelo);
+        Assert.NotNull(modelo!.FindProperty(nameof(Empleado.DepartamentoId)));
+        Assert.NotNull(modelo.FindProperty(nameof(Empleado.SucursalId)));
+        Assert.Null(modelo.FindProperty("Departamento"));
+        Assert.Null(modelo.FindProperty("Sucursal"));
+        Assert.NotNull(modelo.FindNavigation(nameof(Empleado.DepartamentoEntidad)));
+        Assert.NotNull(modelo.FindNavigation(nameof(Empleado.SucursalEntidad)));
     }
 
     [Fact]
@@ -142,11 +362,72 @@ public class EmpleadoServiceTests
     }
 
     [Fact]
+    public async Task CrearAsync_ConNombresDeRelaciones_PersisteLosIds()
+    {
+        await using var context = CreateContext();
+        var service = new EmpleadoService(context);
+
+        var sucursal = new Sucursal
+        {
+            Id = 1,
+            EmpresaId = 1,
+            Nombre = "Central",
+            SerialLector = "LECTOR-01"
+        };
+        context.Sucursal.Add(sucursal);
+        context.Departamento.Add(new Departamento
+        {
+            Id = 1,
+            Nombre = "Ventas",
+            SucursalId = sucursal.Id
+        });
+        await context.SaveChangesAsync();
+
+        var creado = await service.CrearAsync(new EmpleadoRegistroDto
+        {
+            EmpresaId = 1,
+            DNI = "22222222",
+            CUIL = "20-22222222-9",
+            Nombre = "Ana",
+            Apellido = "Gómez",
+            Departamento = "Ventas",
+            Sucursal = "Central"
+        });
+
+        Assert.Equal(1, creado.DepartamentoId);
+        Assert.Equal("Ventas", creado.Departamento);
+        Assert.Equal(1, creado.SucursalId);
+        Assert.Equal("Central", creado.Sucursal);
+
+        var entidad = await context.Empleado.SingleAsync(e => e.Id == creado.Id);
+        Assert.Equal(1, entidad.DepartamentoId);
+        Assert.Equal(1, entidad.SucursalId);
+    }
+
+    [Fact]
     public async Task ActualizarAsync_ConEmpleadoActivo_ActualizaCamposPermitidos()
     {
         await using var context = CreateContext();
         var service = new EmpleadoService(context);
 
+        context.Sucursal.AddRange(
+            new Sucursal
+            {
+                Id = 1,
+                EmpresaId = 1,
+                Nombre = "Central",
+                SerialLector = "LECTOR-01"
+            },
+            new Sucursal
+            {
+                Id = 2,
+                EmpresaId = 1,
+                Nombre = "Norte",
+                SerialLector = "LECTOR-02"
+            });
+        context.Departamento.AddRange(
+            new Departamento { Id = 1, Nombre = "Ventas", SucursalId = 1 },
+            new Departamento { Id = 2, Nombre = "Administración", SucursalId = 2 });
         context.Empleado.Add(new Empleado
         {
             Id = 10,
@@ -155,9 +436,9 @@ public class EmpleadoServiceTests
             CUIL = "20-87654321-9",
             Nombre = "María",
             Apellido = "Pérez",
-            Departamento = "Ventas",
+            DepartamentoId = 1,
             Categoria = "Operario",
-            Sucursal = "Central",
+            SucursalId = 1,
             Horario = "Turno A",
             Activo = true
         });
@@ -174,10 +455,61 @@ public class EmpleadoServiceTests
 
         Assert.NotNull(actualizado);
         Assert.Equal("María Elena", actualizado!.Nombre);
+        Assert.Equal(2, actualizado.DepartamentoId);
         Assert.Equal("Administración", actualizado.Departamento);
         Assert.Equal("Analista", actualizado.Categoria);
+        Assert.Equal(2, actualizado.SucursalId);
         Assert.Equal("Norte", actualizado.Sucursal);
         Assert.Equal("Turno B", actualizado.Horario);
+    }
+
+    [Fact]
+    public async Task ObtenerActivosPorEmpresaAsync_ProyectaRelacionesYTieneHuella()
+    {
+        await using var context = CreateContext();
+        var service = new EmpleadoService(context);
+
+        context.Sucursal.Add(new Sucursal
+        {
+            Id = 1,
+            EmpresaId = 1,
+            Nombre = "Central",
+            SerialLector = "LECTOR-01"
+        });
+        context.Departamento.Add(new Departamento
+        {
+            Id = 1,
+            Nombre = "Ventas",
+            SucursalId = 1
+        });
+        context.Empleado.Add(new Empleado
+        {
+            Id = 20,
+            EmpresaId = 1,
+            DNI = "33333333",
+            CUIL = "20-33333333-9",
+            Nombre = "Laura",
+            Apellido = "Martínez",
+            DepartamentoId = 1,
+            SucursalId = 1,
+            Activo = true
+        });
+        context.Huella.Add(new Huella
+        {
+            Id = 1,
+            EmpleadoId = 20,
+            IndiceDedo = 1,
+            TemplateBiometrico = "template-no-expuesto"
+        });
+        await context.SaveChangesAsync();
+
+        var empleado = Assert.Single(await service.ObtenerActivosPorEmpresaAsync(1));
+
+        Assert.Equal(1, empleado.DepartamentoId);
+        Assert.Equal("Ventas", empleado.Departamento);
+        Assert.Equal(1, empleado.SucursalId);
+        Assert.Equal("Central", empleado.Sucursal);
+        Assert.True(empleado.TieneHuella);
     }
 
     [Fact]

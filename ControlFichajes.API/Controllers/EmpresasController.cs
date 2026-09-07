@@ -1,4 +1,3 @@
-using System.Linq.Expressions;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -22,6 +21,9 @@ namespace ControlFichajes.API.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Empresa>>> GetEmpresas()
         {
+            if (EmpresaAccess.IsSuperAdmin(User))
+                return await _context.Empresa.ToListAsync();
+
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
                 return Forbid();
 
