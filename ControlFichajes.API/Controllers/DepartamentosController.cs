@@ -19,15 +19,22 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Departamento>>> GetDepartamentos()
+        public async Task<IActionResult> GetDepartamentos()
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
                 return Forbid();
 
-            return await _context.Departamento
-                .Include(d => d.Sucursal)
+            var departamentos = await _context.Departamento
                 .Where(d => d.Sucursal != null && d.Sucursal.EmpresaId == empresaId)
+                .Select(d => new
+                {
+                    d.Id,
+                    d.Nombre,
+                    d.SucursalId
+                })
                 .ToListAsync();
+
+            return Ok(departamentos);
         }
 
         [HttpGet("{id}")]
