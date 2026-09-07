@@ -1,5 +1,4 @@
 using ControlFichajes.API.DTOs;
-using ControlFichajes.API.Models;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -44,7 +43,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleados()
+        public async Task<ActionResult<IEnumerable<EmpleadoDto>>> GetEmpleados()
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
                 return Forbid();
@@ -54,7 +53,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet("empresa/{empresaId:int}")]
-        public async Task<ActionResult<IEnumerable<Empleado>>> GetEmpleadosPorEmpresa(int empresaId)
+        public async Task<ActionResult<IEnumerable<EmpleadoDto>>> GetEmpleadosPorEmpresa(int empresaId)
         {
             if (!EmpresaAccess.PerteneceAUsuario(User, empresaId))
                 return Forbid();
@@ -64,7 +63,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<Empleado>> GetEmpleado(int id)
+        public async Task<ActionResult<EmpleadoDto>> GetEmpleado(int id)
         {
             var empleado = await _empleadoService.ObtenerPorIdAsync(id);
             if (empleado == null)
@@ -77,7 +76,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
-        public async Task<ActionResult<Empleado>> PostEmpleado(EmpleadoRegistroDto dto)
+        public async Task<ActionResult<EmpleadoDto>> PostEmpleado(EmpleadoRegistroDto dto)
         {
             if (!EmpresaAccess.PerteneceAUsuario(User, dto.EmpresaId))
                 return Forbid();

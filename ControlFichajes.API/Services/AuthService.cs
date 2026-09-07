@@ -13,6 +13,7 @@ namespace ControlFichajes.API.Services
 {
     public class AuthService : IAuthService
     {
+        public const string SuperAdminRole = AppRoles.SuperAdmin;
         public const string AdminRole = AppRoles.Admin;
         public const string RrhhRole = AppRoles.Rrhh;
 
@@ -136,14 +137,23 @@ namespace ControlFichajes.API.Services
 
         private static List<Claim> CrearClaims(Usuario usuario)
         {
-            return new List<Claim>
+            var rol = AppRoles.IsSuperAdmin(usuario.Rol)
+                ? SuperAdminRole
+                : usuario.Rol;
+
+            var claims = new List<Claim>
             {
                 new(ClaimTypes.NameIdentifier, usuario.Id.ToString()),
                 new(ClaimTypes.Name, usuario.NombreUsuario),
                 new(ClaimTypes.Email, usuario.Correo),
-                new(ClaimTypes.Role, usuario.Rol),
-                new("empresa_id", usuario.EmpresaId.ToString())
+                new(ClaimTypes.Role, rol),
+                new("token_use", "web")
             };
+
+            if (!AppRoles.IsSuperAdmin(rol))
+                claims.Add(new Claim("empresa_id", usuario.EmpresaId.ToString()));
+
+            return claims;
         }
     }
 }

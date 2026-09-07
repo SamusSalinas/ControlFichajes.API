@@ -90,7 +90,7 @@ GET  /api/empresas
 POST /api/empresas
 ```
 
-- `GET /api/empresas`: devuelve la empresa asociada al usuario autenticado.
+- `GET /api/empresas`: devuelve todas las empresas para `SuperAdmin`; para `ADMIN` y `RRHH`, devuelve únicamente la empresa indicada por `empresa_id` en el JWT.
 - `POST /api/empresas`: crea una nueva empresa y solo lo puede hacer un usuario con rol `ADMIN`.
 
 ### Usuarios
@@ -156,6 +156,20 @@ El enrolamiento recibe:
 - `indiceDedo`
 
 La plantilla debe ser FMD ANSI binaria serializada como Base64. No se acepta mezclarla con XML.
+
+## Compatibilidad mínima
+
+### Empleados
+
+| Problema | Antes | Cambio mínimo | Resultado | Requiere BD |
+| --- | --- | --- | --- | --- |
+| Modelo `Empleado` desalineado con producción | EF esperaba `Departamento` y `Sucursal` como columnas de texto | Se mapean `DepartamentoId` y `SucursalId`; los nombres y `TieneHuella` se proyectan en `EmpleadoDto` | Los listados usan las relaciones reales sin exponer templates biométricos | No |
+
+### SuperAdmin / empresas
+
+| Problema | Antes | Cambio mínimo | Resultado | Requiere BD |
+| --- | --- | --- | --- | --- |
+| SuperAdmin quedaba ligado a `empresa_id` y no podía listar ni seleccionar empresas globalmente | El JWT siempre incluía `empresa_id`; `GET /api/empresas` filtraba por ese claim y `X-Empresa-Id` se ignoraba | Se normaliza el rol a `SuperAdmin`, su JWT web omite `empresa_id`, el listado de empresas es global y el contexto tenant se toma únicamente de `X-Empresa-Id` | SuperAdmin selecciona contexto sin permitir que `ADMIN`/`RRHH` cambien de tenant por header | No |
 
 ## Fichadas
 
