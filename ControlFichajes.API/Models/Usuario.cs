@@ -29,5 +29,8 @@ namespace ControlFichajes.API.Models
         [Required]
         [MaxLength(20)]
         public string Rol { get; set; } = "RRHH";
+
+        [Required]
+        public bool Activo { get; set; } = true;
     }
 }

@@ -6,6 +6,7 @@ using ControlFichajes.API.Controllers;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
+using ControlFichajes.API.Security;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -48,7 +49,10 @@ public class AuthServiceTests
             })
             .Build();
 
-        return new AuthService(context, config, new PasswordHasher<Usuario>());
+        return new AuthService(
+            context,
+            new PasswordHasher<Usuario>(),
+            new JwtTokenService(config));
     }
 
     [Fact]
@@ -93,6 +97,34 @@ public class AuthServiceTests
         {
             Email = "admin@empresa.com",
             Password = "PasswordWrong!"
+        });
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task LoginAsync_UsuarioInactivo_RetornaNull()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "Admin inactivo",
+            Correo = "inactivo@empresa.com",
+            Rol = "ADMIN",
+            Activo = false
+        };
+        usuario.PasswordHash = new PasswordHasher<Usuario>()
+            .HashPassword(usuario, "Password123!");
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var result = await service.LoginAsync(new LoginRequestDto
+        {
+            Email = usuario.Correo,
+            Password = "Password123!"
         });
 
         Assert.Null(result);
@@ -294,6 +326,94 @@ public class EmpresaAccessTests
         Assert.Contains(
             typeof(EmpresasController).GetCustomAttributes(inherit: true),
             attribute => attribute is AuthorizeAttribute);
+    }
+}
+
+public class SucursalesControllerTests
+{
+    private static ClaimsPrincipal CrearUsuario(string rol, int? empresaId = null)
+    {
+        var claims = new List<Claim> { new(ClaimTypes.Role, rol) };
+        if (empresaId.HasValue)
+            claims.Add(new Claim("empresa_id", empresaId.Value.ToString()));
+
+        return new ClaimsPrincipal(new ClaimsIdentity(
+            claims,
+            authenticationType: "Test",
+            nameType: ClaimTypes.Name,
+            roleType: ClaimTypes.Role));
+    }
+
+    private static AppDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        var context = new AppDbContext(options);
+        context.Empresa.AddRange(
+            new Empresa
+            {
+                Id = 1,
+                NombreFantasia = "Empresa Uno",
+                RazonSocial = "Empresa Uno S.A.",
+                CUIT = "30-11111111-1"
+            },
+            new Empresa
+            {
+                Id = 2,
+                NombreFantasia = "Empresa Dos",
+                RazonSocial = "Empresa Dos S.A.",
+                CUIT = "30-22222222-2"
+            });
+        context.Sucursal.AddRange(
+            new Sucursal { Id = 1, EmpresaId = 1, Nombre = "Central", SerialLector = "SERIAL-1" },
+            new Sucursal { Id = 2, EmpresaId = 2, Nombre = "Norte", SerialLector = "SERIAL-2" });
+        context.SaveChanges();
+        return context;
+    }
+
+    [Fact]
+    public async Task GetSucursales_SuperAdminUsaEmpresaDelHeader()
+    {
+        await using var context = CreateContext();
+        var user = CrearUsuario(AppRoles.SuperAdmin);
+        EmpresaAccess.ApplyEmpresaContext(
+            user,
+            new HeaderDictionary { ["X-Empresa-Id"] = "2" });
+        var controller = new SucursalesController(context)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = user }
+            }
+        };
+
+        var result = await controller.GetSucursales();
+
+        var sucursal = Assert.Single(result.Value!);
+        Assert.Equal(2, sucursal.EmpresaId);
+        Assert.Equal("Norte", sucursal.Nombre);
+    }
+
+    [Fact]
+    public async Task GetSucursales_SuperAdminSinHeaderDevuelveForbidden()
+    {
+        await using var context = CreateContext();
+        var controller = new SucursalesController(context)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = CrearUsuario(AppRoles.SuperAdmin)
+                }
+            }
+        };
+
+        var result = await controller.GetSucursales();
+
+        Assert.IsType<ForbidResult>(result.Result);
     }
 }
 

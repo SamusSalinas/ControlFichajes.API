@@ -1,34 +1,26 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using ControlFichajes.API.Constants;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 
 namespace ControlFichajes.API.Services
 {
     public class AuthService : IAuthService
     {
-        public const string SuperAdminRole = AppRoles.SuperAdmin;
-        public const string AdminRole = AppRoles.Admin;
-        public const string RrhhRole = AppRoles.Rrhh;
-
         private readonly AppDbContext _context;
-        private readonly IConfiguration _configuration;
         private readonly IPasswordHasher<Usuario> _passwordHasher;
+        private readonly ITokenService _tokenService;
 
         public AuthService(
             AppDbContext context,
-            IConfiguration configuration,
-            IPasswordHasher<Usuario> passwordHasher)
+            IPasswordHasher<Usuario> passwordHasher,
+            ITokenService tokenService)
         {
             _context = context;
-            _configuration = configuration;
             _passwordHasher = passwordHasher;
+            _tokenService = tokenService;
         }
 
         public async Task<AuthResponseDto?> LoginAsync(LoginRequestDto loginDto)
@@ -38,7 +30,7 @@ namespace ControlFichajes.API.Services
                 return null;
 
             var usuario = await _context.Usuario
-                .FirstOrDefaultAsync(u => u.Correo == correo);
+                .FirstOrDefaultAsync(u => u.Correo == correo && u.Activo);
 
             if (usuario == null)
                 return null;
@@ -73,7 +65,7 @@ namespace ControlFichajes.API.Services
             if (bootstrap && await _context.Usuario.AnyAsync())
                 return null;
 
-            var role = bootstrap ? AdminRole : NormalizarRol(registroDto.Rol);
+            var role = bootstrap ? AppRoles.Admin : NormalizarRol(registroDto.Rol);
             var usuario = CrearUsuario(registroDto, correo, nombreUsuario, role);
 
             _context.Usuario.Add(usuario);
@@ -108,52 +100,18 @@ namespace ControlFichajes.API.Services
         private static string NormalizarRol(string rol)
         {
             var rolNormalizado = rol?.Trim() ?? string.Empty;
-            return rolNormalizado is AdminRole or RrhhRole ? rolNormalizado : RrhhRole;
+            return rolNormalizado is AppRoles.Admin or AppRoles.Rrhh
+                ? rolNormalizado
+                : AppRoles.Rrhh;
         }
 
         private AuthResponseDto CrearRespuesta(Usuario usuario)
         {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!);
-            var claims = CrearClaims(usuario);
-
-            var tokenDescriptor = new SecurityTokenDescriptor
-            {
-                Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddMinutes(Convert.ToDouble(_configuration["Jwt:ExpireMinutes"])),
-                Issuer = _configuration["Jwt:Issuer"],
-                Audience = _configuration["Jwt:Audience"],
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
-            };
-
-            var token = tokenHandler.CreateToken(tokenDescriptor);
-
             return new AuthResponseDto
             {
-                Token = tokenHandler.WriteToken(token),
+                Token = _tokenService.CreateToken(usuario),
                 Mensaje = "Autenticación exitosa"
             };
-        }
-
-        private static List<Claim> CrearClaims(Usuario usuario)
-        {
-            var rol = AppRoles.IsSuperAdmin(usuario.Rol)
-                ? SuperAdminRole
-                : usuario.Rol;
-
-            var claims = new List<Claim>
-            {
-                new(ClaimTypes.NameIdentifier, usuario.Id.ToString()),
-                new(ClaimTypes.Name, usuario.NombreUsuario),
-                new(ClaimTypes.Email, usuario.Correo),
-                new(ClaimTypes.Role, rol),
-                new("token_use", "web")
-            };
-
-            if (!AppRoles.IsSuperAdmin(rol))
-                claims.Add(new Claim("empresa_id", usuario.EmpresaId.ToString()));
-
-            return claims;
         }
     }
 }

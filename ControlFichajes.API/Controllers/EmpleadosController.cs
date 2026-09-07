@@ -1,4 +1,5 @@
 using ControlFichajes.API.DTOs;
+using ControlFichajes.API.Security;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
