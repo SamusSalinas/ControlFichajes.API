@@ -36,9 +36,42 @@ public sealed class JwtTokenService : ITokenService
         return tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
     }
 
+    public string CreateAgentToken(AgenteInstalacion agente, int empresaId)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, agente.Id.ToString()),
+            new(ClaimTypes.Name, agente.ClientId),
+            new(ClaimTypes.Role, "AGENTE_SUCURSAL"),
+            new("token_use", "agent"),
+            new("agente_id", agente.Id.ToString()),
+            new("empresa_id", empresaId.ToString()),
+            new("sucursal_id", agente.SucursalId.ToString())
+        };
+
+        return CreateSignedToken(claims);
+    }
+
     private double GetExpirationMinutes()
     {
         return Convert.ToDouble(GetRequiredConfiguration("Jwt:ExpireMinutes"));
+    }
+
+    private string CreateSignedToken(IEnumerable<Claim> claims)
+    {
+        var tokenHandler = new JwtSecurityTokenHandler();
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(claims),
+            Expires = DateTime.UtcNow.AddMinutes(GetExpirationMinutes()),
+            Issuer = GetRequiredConfiguration("Jwt:Issuer"),
+            Audience = GetRequiredConfiguration("Jwt:Audience"),
+            SigningCredentials = new SigningCredentials(
+                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(GetRequiredConfiguration("Jwt:Key"))),
+                SecurityAlgorithms.HmacSha256Signature)
+        };
+
+        return tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
     }
 
     private string GetRequiredConfiguration(string key)

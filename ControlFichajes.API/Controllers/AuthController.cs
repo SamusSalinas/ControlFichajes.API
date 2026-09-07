@@ -10,10 +10,12 @@ namespace ControlFichajes.API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly IAgenteService _agenteService;
 
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, IAgenteService agenteService)
         {
             _authService = authService;
+            _agenteService = agenteService;
         }
 
         [HttpPost("Login")]
@@ -38,6 +40,16 @@ namespace ControlFichajes.API.Controllers
                 return Conflict(new { mensaje = "El registro inicial ya fue realizado o los datos no son válidos." });
 
             return Ok(response);
+        }
+
+        [HttpPost("agente")]
+        [AllowAnonymous]
+        public async Task<IActionResult> LoginAgente(AgenteLoginDto request)
+        {
+            var token = await _agenteService.AutenticarAsync(request);
+            return token == null
+                ? Unauthorized(new { mensaje = "Credenciales de agente incorrectas." })
+                : Ok(new AuthResponseDto { Token = token, Mensaje = "Autenticación exitosa" });
         }
 
     }

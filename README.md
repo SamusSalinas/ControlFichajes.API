@@ -81,6 +81,50 @@ Si ya existe algún usuario, `POST /api/auth/bootstrap` responde `409 Conflict`.
 
 En ese caso, se debe utilizar el token de un administrador para crear nuevos usuarios.
 
+### Agentes biométricos
+
+Los agentes son instalaciones de servicio vinculadas a una sucursal. No utilizan el
+login humano ni se almacenan como usuarios en la tabla `Usuario`. La API persiste
+el hash del secreto en `AgenteInstalaciones.ClientSecretHash` y solo devuelve el
+secreto en claro al crear o rotar una instalación.
+
+```text
+POST  /api/auth/agente
+POST  /api/agentes
+GET   /api/agentes
+GET   /api/agentes/{id}
+POST  /api/agentes/{id}/rotar-secret
+PATCH /api/agentes/{id}/desactivar
+POST  /api/agentes/{id}/heartbeat
+```
+
+El login de agente recibe `clientId` y `clientSecret` y devuelve un JWT con:
+
+- `token_use = agent`
+- `agente_id`
+- `empresa_id`
+- `sucursal_id`
+- rol `AGENTE_SUCURSAL`
+
+```http
+POST /api/auth/agente
+Content-Type: application/json
+
+{
+  "clientId": "lector-central",
+  "clientSecret": "********"
+}
+```
+
+Solo `SuperAdmin` puede crear, listar, consultar, rotar o desactivar agentes.
+El heartbeat solo acepta el token del agente cuyo `agente_id` coincide con la
+ruta. La tabla actual solo dispone de `UltimoAcceso`, por lo que ese es el dato
+de estado persistido.
+
+Los tokens de agente pueden consumir el catálogo de empleados, huellas,
+enrolamiento y `POST /api/fichadas/bulk`. No pueden acceder a las operaciones
+web de gestión, empresas, sucursales, usuarios ni fichadas históricas.
+
 ## Empresas, usuarios, sucursales y departamentos
 
 ### Empresas
@@ -276,6 +320,12 @@ La validación actual cubre:
 
 - registro de usuarios
 - login con credenciales inválidas
+- rechazo de login para usuarios inactivos
+- claims JWT de SuperAdmin sin `empresa_id`
+- selección de empresa por `X-Empresa-Id`
+- listado de sucursales con contexto SuperAdmin
+- alta, autenticación y desactivación de agentes
+- claims tenant del JWT de agente
 - prevención de duplicados en DNI/CUIL
 - actualización de empleados activos vía PATCH
 - baja lógica (soft delete) de empleados

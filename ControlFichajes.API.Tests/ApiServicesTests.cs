@@ -417,6 +417,111 @@ public class SucursalesControllerTests
     }
 }
 
+public class AgenteServiceTests
+{
+    private static AppDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        var context = new AppDbContext(options);
+        context.Empresa.Add(new Empresa
+        {
+            Id = 1,
+            NombreFantasia = "Empresa Test",
+            RazonSocial = "Empresa Test S.A.",
+            CUIT = "30-12345678-9"
+        });
+        context.Sucursal.Add(new Sucursal
+        {
+            Id = 1,
+            EmpresaId = 1,
+            Nombre = "Central",
+            SerialLector = "SERIAL-1"
+        });
+        context.SaveChanges();
+        return context;
+    }
+
+    private static JwtTokenService CreateTokenService()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "clave-super-secreta-de-pruebas-1234567890",
+                ["Jwt:Issuer"] = "ControlFichajes.Tests",
+                ["Jwt:Audience"] = "ControlFichajes.Frontend.Tests",
+                ["Jwt:ExpireMinutes"] = "60"
+            })
+            .Build();
+
+        return new JwtTokenService(configuration);
+    }
+
+    [Fact]
+    public async Task CrearYAutenticarAgente_EmiteClaimsDeSucursal()
+    {
+        await using var context = CreateContext();
+        var service = new AgenteService(
+            context,
+            new PasswordHasher<AgenteInstalacion>(),
+            CreateTokenService());
+
+        var creado = await service.CrearAsync(new AgenteCrearDto
+        {
+            SucursalId = 1,
+            ClientId = "lector-central",
+            Nombre = "Lector Central"
+        });
+
+        Assert.NotNull(creado);
+        Assert.Equal(1, creado!.EmpresaId);
+        Assert.NotEmpty(creado.ClientSecret);
+
+        var token = await service.AutenticarAsync(new AgenteLoginDto
+        {
+            ClientId = creado.ClientId,
+            ClientSecret = creado.ClientSecret
+        });
+
+        Assert.NotNull(token);
+        var claims = new JwtSecurityTokenHandler().ReadJwtToken(token!);
+        Assert.Equal("agent", claims.Claims.Single(c => c.Type == "token_use").Value);
+        Assert.Equal("1", claims.Claims.Single(c => c.Type == "agente_id").Value);
+        Assert.Equal("1", claims.Claims.Single(c => c.Type == "empresa_id").Value);
+        Assert.Equal("1", claims.Claims.Single(c => c.Type == "sucursal_id").Value);
+        Assert.Equal("AGENTE_SUCURSAL", claims.Claims.Single(c => c.Type is "role" or ClaimTypes.Role).Value);
+    }
+
+    [Fact]
+    public async Task DesactivarAgente_ImpideNuevoLogin()
+    {
+        await using var context = CreateContext();
+        var service = new AgenteService(
+            context,
+            new PasswordHasher<AgenteInstalacion>(),
+            CreateTokenService());
+        var creado = await service.CrearAsync(new AgenteCrearDto
+        {
+            SucursalId = 1,
+            ClientId = "lector-central",
+            Nombre = "Lector Central"
+        });
+
+        Assert.NotNull(creado);
+        Assert.True(await service.DesactivarAsync(creado!.Id));
+
+        var token = await service.AutenticarAsync(new AgenteLoginDto
+        {
+            ClientId = creado.ClientId,
+            ClientSecret = creado.ClientSecret
+        });
+
+        Assert.Null(token);
+    }
+}
+
 public class EmpleadoServiceTests
 {
     private static AppDbContext CreateContext()

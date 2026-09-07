@@ -8,7 +8,6 @@ namespace ControlFichajes.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize]
     public class EmpleadosController : ControllerBase
     {
         private readonly IEmpleadoService _empleadoService;
@@ -19,6 +18,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost("enrolar")]
+        [Authorize(Policy = "SoloAgente")]
         public async Task<IActionResult> EnrolarEmpleado([FromBody] HuellaEnrolarDto huellaDto)
         {
             try
@@ -44,6 +44,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet]
+        [Authorize(Policy = "WebOAgente")]
         public async Task<ActionResult<IEnumerable<EmpleadoDto>>> GetEmpleados()
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
@@ -54,6 +55,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet("empresa/{empresaId:int}")]
+        [Authorize]
         public async Task<ActionResult<IEnumerable<EmpleadoDto>>> GetEmpleadosPorEmpresa(int empresaId)
         {
             if (!EmpresaAccess.PerteneceAUsuario(User, empresaId))
@@ -64,6 +66,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet("{id}")]
+        [Authorize]
         public async Task<ActionResult<EmpleadoDto>> GetEmpleado(int id)
         {
             var empleado = await _empleadoService.ObtenerPorIdAsync(id);
@@ -77,6 +80,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
+        [Authorize]
         public async Task<ActionResult<EmpleadoDto>> PostEmpleado(EmpleadoRegistroDto dto)
         {
             if (!EmpresaAccess.PerteneceAUsuario(User, dto.EmpresaId))
@@ -94,6 +98,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPatch("{id}")]
+        [Authorize]
         public async Task<IActionResult> PatchEmpleado(int id, [FromBody] EmpleadoPatchDto dto)
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
@@ -114,6 +119,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize]
         public async Task<IActionResult> DeleteEmpleado(int id)
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))

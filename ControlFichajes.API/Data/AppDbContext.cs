@@ -14,6 +14,7 @@ namespace ControlFichajes.API.Data
         public DbSet<Fichada> Fichada { get; set; }
         public DbSet<Sucursal> Sucursal { get; set; }
         public DbSet<Departamento> Departamento { get; set; }
+        public DbSet<AgenteInstalacion> AgenteInstalacion { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
