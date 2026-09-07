@@ -19,7 +19,7 @@ namespace ControlFichajes.API.Models
         public virtual Empresa? Empresa { get; set; }
 
         [Required]
-        [MaxLength(200)]
+        [MaxLength(100)]
         public string SerialLector { get; set; } = string.Empty;
 
         public virtual ICollection<Departamento> Departamentos { get; set; } = new List<Departamento>();

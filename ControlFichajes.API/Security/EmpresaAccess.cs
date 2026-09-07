@@ -2,7 +2,7 @@ using System.Security.Claims;
 using ControlFichajes.API.Constants;
 using Microsoft.AspNetCore.Http;
 
-namespace ControlFichajes.API.Controllers;
+namespace ControlFichajes.API.Security;
 
 public static class EmpresaAccess
 {

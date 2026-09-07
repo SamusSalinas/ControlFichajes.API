@@ -1,5 +1,6 @@
 using ControlFichajes.API.Data;
 using ControlFichajes.API.Models;
+using ControlFichajes.API.Security;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;

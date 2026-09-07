@@ -6,7 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.AspNetCore.Identity;
 using ControlFichajes.API.Models;
-using ControlFichajes.API.Controllers;
+using ControlFichajes.API.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,6 +43,7 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmpleadoService, EmpleadoService>();
 builder.Services.AddScoped<IPasswordHasher<Usuario>, PasswordHasher<Usuario>>();
 
@@ -74,11 +75,7 @@ app.UseCors("PermitirFrontend");
 
 // 4. Agregar middlewares de autenticación y autorización (el ORDEN es vital)
 app.UseAuthentication();
-app.Use(async (context, next) =>
-{
-    EmpresaAccess.ApplyEmpresaContext(context.User, context.Request.Headers);
-    await next();
-});
+app.UseMiddleware<EmpresaContextMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();
