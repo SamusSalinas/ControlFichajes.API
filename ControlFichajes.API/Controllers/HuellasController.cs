@@ -8,7 +8,7 @@ namespace ControlFichajes.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "SoloAgente")]
 public class HuellasController : ControllerBase
 {
     private readonly AppDbContext _context;

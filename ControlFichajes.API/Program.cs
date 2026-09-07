@@ -44,8 +44,10 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
+builder.Services.AddScoped<IAgenteService, AgenteService>();
 builder.Services.AddScoped<IEmpleadoService, EmpleadoService>();
 builder.Services.AddScoped<IPasswordHasher<Usuario>, PasswordHasher<Usuario>>();
+builder.Services.AddScoped<IPasswordHasher<AgenteInstalacion>, PasswordHasher<AgenteInstalacion>>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -62,6 +64,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Missing Jwt:Key configuration.")))
         };
     });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.DefaultPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .RequireClaim("token_use", "web")
+        .Build();
+    options.AddPolicy("SoloSuperadmin", policy => policy
+        .RequireClaim("token_use", "web")
+        .RequireRole("SuperAdmin"));
+    options.AddPolicy("SoloAgente", policy => policy
+        .RequireClaim("token_use", "agent")
+        .RequireRole("AGENTE_SUCURSAL"));
+    options.AddPolicy("WebOAgente", policy => policy.RequireAssertion(context =>
+        context.User.HasClaim("token_use", "web") || context.User.HasClaim("token_use", "agent")));
+});
 
 var app = builder.Build();
 
