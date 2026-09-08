@@ -188,7 +188,7 @@ POST /api/empresas
 ```
 
 - `GET /api/empresas`: devuelve todas las empresas para `SuperAdmin`; para `ADMIN` y `RRHH`, devuelve únicamente la empresa indicada por `empresa_id` en el JWT.
-- `POST /api/empresas`: crea una nueva empresa y solo lo puede hacer un usuario con rol `ADMIN`.
+- `POST /api/empresas`: crea una nueva empresa y solo lo puede hacer un usuario con rol `SuperAdmin`.
 
 ### Usuarios
 
@@ -211,6 +211,7 @@ DELETE /api/sucursales/{id}
 ```
 
 - Las sucursales están vinculadas a la empresa del usuario autenticado.
+- Solo `SuperAdmin` puede crear sucursales; debe enviar `X-Empresa-Id` para seleccionar la empresa operativa.
 - Los `GET` devuelven únicamente los datos de la sucursal (`id`, `nombre`, `empresaId` y `serialLector`).
 - Los departamentos se consultan por separado mediante `/api/departamentos`, evitando ciclos de serialización entre sucursales y departamentos.
 

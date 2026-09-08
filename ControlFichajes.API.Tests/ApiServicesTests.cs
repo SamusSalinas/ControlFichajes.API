@@ -130,6 +130,36 @@ public class AuthServiceTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task LoginAsync_SuperAdminConAdmin123_DevuelveTokenSuperAdmin()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "Administrador",
+            Correo = "admin@accesos.local",
+            Rol = AppRoles.SuperAdmin,
+            Activo = true
+        };
+        usuario.PasswordHash = new PasswordHasher<Usuario>()
+            .HashPassword(usuario, "admin123");
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var result = await service.LoginAsync(new LoginRequestDto
+        {
+            Email = usuario.Correo,
+            Password = "admin123"
+        });
+
+        Assert.NotNull(result);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(result!.Token);
+        Assert.Equal(AppRoles.SuperAdmin, token.Claims.Single(c => c.Type is "role" or ClaimTypes.Role).Value);
+        Assert.DoesNotContain(token.Claims, claim => claim.Type == "empresa_id");
+    }
+
     [Theory]
     [InlineData("SuperAdmin")]
     [InlineData("SUPERADMIN")]
@@ -321,6 +351,50 @@ public class EmpresaAccessTests
     }
 
     [Fact]
+    public async Task PostEmpresa_AdminDevuelveForbidden()
+    {
+        await using var context = CreateContext();
+        var controller = CrearEmpresasController(context, CrearUsuario(AppRoles.Admin, empresaId: 1));
+
+        var result = await controller.PostEmpresa(new Empresa
+        {
+            NombreFantasia = "No autorizada",
+            RazonSocial = "No autorizada S.A.",
+            CUIT = "30-33333333-3"
+        });
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task PostEmpresa_SuperAdminCreaEmpresa()
+    {
+        await using var context = CreateContext();
+        var controller = CrearEmpresasController(context, CrearUsuario(AppRoles.SuperAdmin));
+
+        var result = await controller.PostEmpresa(new Empresa
+        {
+            NombreFantasia = "Empresa Nueva",
+            RazonSocial = "Empresa Nueva S.A.",
+            CUIT = "30-33333333-3"
+        });
+
+        Assert.IsType<CreatedAtActionResult>(result.Result);
+        Assert.Equal("Empresa Nueva", (await context.Empresa.SingleAsync(e => e.CUIT == "30-33333333-3")).NombreFantasia);
+    }
+
+    private static EmpresasController CrearEmpresasController(AppDbContext context, ClaimsPrincipal user)
+    {
+        return new EmpresasController(context)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = user }
+            }
+        };
+    }
+
+    [Fact]
     public void EmpresasController_RequiereAutenticacion()
     {
         Assert.Contains(
@@ -414,6 +488,52 @@ public class SucursalesControllerTests
         var result = await controller.GetSucursales();
 
         Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task PostSucursal_AdminDevuelveForbidden()
+    {
+        await using var context = CreateContext();
+        var controller = CrearController(context, CrearUsuario(AppRoles.Admin, empresaId: 1));
+
+        var result = await controller.PostSucursal(new Sucursal
+        {
+            EmpresaId = 1,
+            Nombre = "No autorizada",
+            SerialLector = "SERIAL-3"
+        });
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task PostSucursal_SuperAdminConContextoCreaSucursal()
+    {
+        await using var context = CreateContext();
+        var user = CrearUsuario(AppRoles.SuperAdmin);
+        EmpresaAccess.ApplyEmpresaContext(user, new HeaderDictionary { ["X-Empresa-Id"] = "2" });
+        var controller = CrearController(context, user);
+
+        var result = await controller.PostSucursal(new Sucursal
+        {
+            EmpresaId = 2,
+            Nombre = "Sur",
+            SerialLector = "SERIAL-3"
+        });
+
+        Assert.IsType<CreatedAtActionResult>(result.Result);
+        Assert.True(await context.Sucursal.AnyAsync(s => s.EmpresaId == 2 && s.Nombre == "Sur"));
+    }
+
+    private static SucursalesController CrearController(AppDbContext context, ClaimsPrincipal user)
+    {
+        return new SucursalesController(context)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = user }
+            }
+        };
     }
 }
 
