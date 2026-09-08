@@ -32,9 +32,10 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Policy = "SoloSuperadmin")]
         public async Task<ActionResult<Empresa>> PostEmpresa(Empresa empresa)
         {
-            if (!User.IsInRole("ADMIN"))
+            if (!EmpresaAccess.IsSuperAdmin(User))
                 return Forbid();
 
             _context.Empresa.Add(empresa);

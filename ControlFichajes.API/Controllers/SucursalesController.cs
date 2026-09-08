@@ -60,8 +60,12 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Policy = "SoloSuperadmin")]
         public async Task<ActionResult<Sucursal>> PostSucursal(Sucursal sucursal)
         {
+            if (!EmpresaAccess.IsSuperAdmin(User))
+                return Forbid();
+
             if (!EmpresaAccess.PerteneceAUsuario(User, sucursal.EmpresaId))
                 return Forbid();
 
