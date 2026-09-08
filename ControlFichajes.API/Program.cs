@@ -74,6 +74,10 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("SoloSuperadmin", policy => policy
         .RequireClaim("token_use", "web")
         .RequireRole("SuperAdmin"));
+    options.AddPolicy("PuedeCrearUsuarios", policy => policy
+        .RequireClaim("token_use", "web")
+        .RequireAssertion(context =>
+            context.User.IsInRole("ADMIN") || context.User.IsInRole("SuperAdmin")));
     options.AddPolicy("SoloAgente", policy => policy
         .RequireClaim("token_use", "agent")
         .RequireRole("AGENTE_SUCURSAL"));

@@ -9,7 +9,7 @@ namespace ControlFichajes.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "ADMIN")]
+[Authorize(Policy = "PuedeCrearUsuarios")]
 public class UsuariosController : ControllerBase
 {
     private readonly IAuthService _authService;
