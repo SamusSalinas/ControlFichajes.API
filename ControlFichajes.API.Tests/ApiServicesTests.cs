@@ -537,6 +537,141 @@ public class SucursalesControllerTests
     }
 }
 
+public class UsuariosControllerTests
+{
+    private static ClaimsPrincipal CrearUsuario(string rol, int? empresaId = null)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.Role, rol),
+            new("token_use", "web")
+        };
+        if (empresaId.HasValue)
+            claims.Add(new Claim("empresa_id", empresaId.Value.ToString()));
+
+        return new ClaimsPrincipal(new ClaimsIdentity(
+            claims,
+            authenticationType: "Test",
+            nameType: ClaimTypes.Name,
+            roleType: ClaimTypes.Role));
+    }
+
+    private static AppDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        var context = new AppDbContext(options);
+        context.Empresa.AddRange(
+            new Empresa
+            {
+                Id = 1,
+                NombreFantasia = "Empresa Uno",
+                RazonSocial = "Empresa Uno S.A.",
+                CUIT = "30-11111111-1"
+            },
+            new Empresa
+            {
+                Id = 2,
+                NombreFantasia = "Empresa Dos",
+                RazonSocial = "Empresa Dos S.A.",
+                CUIT = "30-22222222-2"
+            });
+        context.SaveChanges();
+        return context;
+    }
+
+    private static UsuariosController CrearController(AppDbContext context, ClaimsPrincipal user)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "clave-super-secreta-de-pruebas-1234567890",
+                ["Jwt:Issuer"] = "ControlFichajes.Tests",
+                ["Jwt:Audience"] = "ControlFichajes.Frontend.Tests",
+                ["Jwt:ExpireMinutes"] = "60"
+            })
+            .Build();
+        var authService = new AuthService(
+            context,
+            new PasswordHasher<Usuario>(),
+            new JwtTokenService(configuration));
+
+        return new UsuariosController(authService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = user }
+            }
+        };
+    }
+
+    private static UsuarioRegistroDto CrearRequest(int empresaId)
+    {
+        return new UsuarioRegistroDto
+        {
+            EmpresaId = empresaId,
+            NombreUsuario = "Nuevo usuario",
+            Email = $"nuevo-{empresaId}@empresa.com",
+            Password = "Password123!",
+            Rol = AppRoles.Rrhh
+        };
+    }
+
+    [Fact]
+    public async Task Crear_AdminCreaUsuarioEnSuEmpresa()
+    {
+        await using var context = CreateContext();
+        var controller = CrearController(context, CrearUsuario(AppRoles.Admin, empresaId: 1));
+
+        var result = await controller.Crear(CrearRequest(1));
+
+        Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status201Created, ((ObjectResult)result).StatusCode);
+        Assert.True(await context.Usuario.AnyAsync(u => u.EmpresaId == 1));
+    }
+
+    [Fact]
+    public async Task Crear_SuperAdminCreaUsuarioEnEmpresaSeleccionada()
+    {
+        await using var context = CreateContext();
+        var user = CrearUsuario(AppRoles.SuperAdmin);
+        EmpresaAccess.ApplyEmpresaContext(user, new HeaderDictionary { ["X-Empresa-Id"] = "2" });
+        var controller = CrearController(context, user);
+
+        var result = await controller.Crear(CrearRequest(2));
+
+        Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status201Created, ((ObjectResult)result).StatusCode);
+        Assert.True(await context.Usuario.AnyAsync(u => u.EmpresaId == 2));
+    }
+
+    [Fact]
+    public async Task Crear_AdminNoPuedeCrearUsuarioEnOtraEmpresa()
+    {
+        await using var context = CreateContext();
+        var controller = CrearController(context, CrearUsuario(AppRoles.Admin, empresaId: 1));
+
+        var result = await controller.Crear(CrearRequest(2));
+
+        Assert.IsType<ForbidResult>(result);
+        Assert.Empty(await context.Usuario.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Crear_SuperAdminSinEmpresaSeleccionadaDevuelveForbidden()
+    {
+        await using var context = CreateContext();
+        var controller = CrearController(context, CrearUsuario(AppRoles.SuperAdmin));
+
+        var result = await controller.Crear(CrearRequest(1));
+
+        Assert.IsType<ForbidResult>(result);
+        Assert.Empty(await context.Usuario.ToListAsync());
+    }
+}
+
 public class AgenteServiceTests
 {
     private static AppDbContext CreateContext()

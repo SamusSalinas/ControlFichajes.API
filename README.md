@@ -197,7 +197,9 @@ POST /api/usuarios
 ```
 
 - Registra un usuario de la empresa autenticada.
-- Solo puede ejecutarlo un usuario con rol `ADMIN`.
+- Puede ejecutarlo un usuario con rol `ADMIN` o `SuperAdmin`.
+- `ADMIN` solo puede crear usuarios de su propia empresa; `SuperAdmin` debe
+  seleccionar la empresa mediante `X-Empresa-Id`.
 - Los roles permitidos son `ADMIN` y `RRHH`.
 
 ### Sucursales
