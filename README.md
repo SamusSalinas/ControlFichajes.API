@@ -81,6 +81,59 @@ Si ya existe algún usuario, `POST /api/auth/bootstrap` responde `409 Conflict`.
 
 En ese caso, se debe utilizar el token de un administrador para crear nuevos usuarios.
 
+### Flujo del SuperAdmin
+
+El primer usuario creado por `POST /api/auth/bootstrap` es `ADMIN`, no
+`SuperAdmin`. Para disponer de un SuperAdmin, la cuenta debe existir en la base
+de datos con `Rol = "SuperAdmin"` y estar activa (`Activo = true`).
+
+1. Iniciar sesión con `POST /api/auth/login` usando las credenciales del SuperAdmin.
+2. Guardar el JWT recibido. El token de SuperAdmin no contiene `empresa_id`.
+3. Consultar todas las empresas sin seleccionar un tenant:
+
+```http
+GET /api/empresas
+Authorization: Bearer <token-superadmin>
+```
+
+4. Seleccionar la empresa operativa enviando `X-Empresa-Id` en cada endpoint que
+trabaja sobre una empresa concreta:
+
+```http
+GET /api/sucursales
+Authorization: Bearer <token-superadmin>
+X-Empresa-Id: 2
+```
+
+El contexto de empresa se aplica únicamente a SuperAdmin. Los usuarios `ADMIN`
+y `RRHH` utilizan el `empresa_id` incluido en su propio JWT y no pueden cambiar
+de empresa mediante este header.
+
+5. Administrar agentes biométricos. Estas operaciones son globales y requieren
+únicamente el JWT del SuperAdmin:
+
+```http
+POST /api/agentes
+GET /api/agentes
+GET /api/agentes/{id}
+POST /api/agentes/{id}/rotar-secret
+PATCH /api/agentes/{id}/desactivar
+```
+
+Para crear un agente se debe indicar la sucursal a la que quedará vinculado:
+
+```json
+{
+   "sucursalId": 2,
+   "clientId": "lector-sucursal-2",
+   "nombre": "Lector principal"
+}
+```
+
+La respuesta de alta o rotación contiene el `clientSecret` en claro por única
+vez. Debe entregarse al instalador biométrico y no registrarse en logs ni
+guardarse en el frontend.
+
 ### Agentes biométricos
 
 Los agentes son instalaciones de servicio vinculadas a una sucursal. No utilizan el
