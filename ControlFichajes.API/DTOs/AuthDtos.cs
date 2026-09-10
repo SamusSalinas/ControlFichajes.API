@@ -15,6 +15,7 @@ namespace ControlFichajes.API.DTOs
     {
         public string Token {get; set;} = string.Empty;
         public string Mensaje {get; set;} = string.Empty;
+        public bool RequiereCambioPassword { get; set; } = false;
     }
 
     public class UsuarioRegistroDto
@@ -33,5 +34,35 @@ namespace ControlFichajes.API.DTOs
 
         [MaxLength(20)]
         public string Rol { get; set; } = "RRHH";
+    }
+
+    public class UsuarioListItemDto
+    {
+        public int Id { get; set; }
+        public int EmpresaId { get; set; }
+        public string NombreUsuario { get; set; } = string.Empty;
+        public string Correo { get; set; } = string.Empty;
+        public string Rol { get; set; } = string.Empty;
+        public bool Activo { get; set; }
+        public bool RequiereCambioPassword { get; set; }
+    }
+
+    public class CambiarPasswordRequestDto
+    {
+        [Required]
+        public string PasswordActual { get; set; } = string.Empty;
+
+        [Required, MinLength(8), MaxLength(20)]
+        public string NuevaPassword { get; set; } = string.Empty;
+
+        [Required]
+        public string ConfirmarPassword { get; set; } = string.Empty;
+    }
+
+    public class RestablecerPasswordResponseDto
+    {
+        public string Mensaje { get; set; } = string.Empty;
+        public string PasswordTemporal { get; set; } = string.Empty;
+        public DateTime VenceEn { get; set; }
     }
 }

@@ -32,5 +32,17 @@ namespace ControlFichajes.API.Models
 
         [Required]
         public bool Activo { get; set; } = true;
+
+        public bool RequiereCambioPassword { get; set; } = false;
+
+        public int IntentosFallidos { get; set; } = 0;
+
+        public DateTime? BloqueadoHasta { get; set; }
+
+        public DateTime? UltimoIntentoFallido { get; set; }
+
+        public DateTime? PasswordTemporalVenceEn { get; set; }
+
+        public bool PasswordTemporalUsada { get; set; } = false;
     }
 }
