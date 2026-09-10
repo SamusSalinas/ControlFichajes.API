@@ -97,6 +97,7 @@ app.UseCors("PermitirFrontend");
 
 // 4. Agregar middlewares de autenticación y autorización (el ORDEN es vital)
 app.UseAuthentication();
+app.UseMiddleware<WebSessionSecurityMiddleware>();
 app.UseMiddleware<EmpresaContextMiddleware>();
 app.UseAuthorization();
 

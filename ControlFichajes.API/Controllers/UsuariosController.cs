@@ -5,7 +5,6 @@ using ControlFichajes.API.Security;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 
 namespace ControlFichajes.API.Controllers;
@@ -66,13 +65,14 @@ public class UsuariosController : ControllerBase
         if (target == null)
             return NotFound(new { mensaje = "Usuario no encontrado." });
 
-        var callingUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
-        var operadorNombre = User.FindFirstValue(ClaimTypes.Name) ?? string.Empty;
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var callingUserId))
+            return Unauthorized(new { mensaje = "Sesión inválida." });
+
         var operadorEmpresa = EmpresaAccess.TryGetEmpresaId(User, out var empresaIdOp) ? empresaIdOp : 0;
 
         if (User.IsInRole(AppRoles.SuperAdmin))
         {
-            if (target.Rol == AppRoles.SuperAdmin || target.Id == int.Parse(callingUserId))
+            if (target.Rol == AppRoles.SuperAdmin || target.Id == callingUserId)
                 return NotFound(new { mensaje = "Usuario no encontrado." });
 
             if (target.Rol is not (AppRoles.Admin or AppRoles.Rrhh))
@@ -101,12 +101,14 @@ public class UsuariosController : ControllerBase
         if (target == null)
             return NotFound(new { mensaje = "Usuario no encontrado." });
 
-        var callingUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var callingUserId))
+            return Unauthorized(new { mensaje = "Sesión inválida." });
+
         var operadorEmpresa = EmpresaAccess.TryGetEmpresaId(User, out var empresaIdOp) ? empresaIdOp : 0;
 
         if (User.IsInRole(AppRoles.SuperAdmin))
         {
-            if (target.Rol == AppRoles.SuperAdmin || target.Id == int.Parse(callingUserId))
+            if (target.Rol == AppRoles.SuperAdmin || target.Id == callingUserId)
                 return NotFound(new { mensaje = "Usuario no encontrado." });
 
             if (target.Rol is not (AppRoles.Admin or AppRoles.Rrhh))
@@ -126,12 +128,5 @@ public class UsuariosController : ControllerBase
         }
 
         return NotFound(new { mensaje = "Usuario no encontrado." });
-    }
-
-    [HttpPost("{id}/cambiar-password")]
-    public async Task<IActionResult> CambiarPassword(int id, [FromBody] CambiarPasswordRequestDto request)
-    {
-        var ok = await _authService.CambiarPasswordAsync(id, request);
-        return ok ? Ok(new { mensaje = "Contraseña actualizada." }) : BadRequest(new { mensaje = "La contraseña nueva no cumple el contrato requerido." });
     }
 }

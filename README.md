@@ -256,11 +256,13 @@ usuarios entre empresas.
   hash de forma segura y responde una sola vez con el valor temporal claro.
   La contraseña temporal:
 
+  - tiene 16 caracteres, con al menos una letra, un número y un carácter
+    especial, sin espacios
   - se marca con `RequiereCambioPassword = true`
   - se marca `PasswordTemporalUsada = false`
-  - tiene vencimiento por `PasswordTemporalVenceEn` en UTC
+  - vence a las 24 horas mediante `PasswordTemporalVenceEn` en UTC
   - se limpia `IntentosFallidos`, `BloqueadoHasta`, `UltimoIntentoFallido`
-  - queda invalidada al cambiar la clave final
+  - incrementa `TokenVersion` e invalida los JWT web anteriores
   - no se registra en logs, auditoría ni telemetría
 
 - El `POST /api/auth/cambiar-password` es la ruta de primer ingreso y cambio
@@ -275,13 +277,25 @@ usuarios entre empresas.
   - la nueva no debe ser igual a la contraseña actual
 
   La operación debe verificar `PasswordActual` contra `PasswordHash` antes
-  de aceptar el cambio, y al completar:
+  de aceptar el cambio. Cuando `RequiereCambioPassword = true`, también exige
+  que la temporal no esté usada, tenga vencimiento y siga vigente. Al completar:
 
   - actualiza el hash
   - pone `RequiereCambioPassword = false`
   - pone `PasswordTemporalUsada = true`
   - limpia `PasswordTemporalVenceEn`
   - limpia `IntentosFallidos`, `BloqueadoHasta`, `UltimoIntentoFallido`
+  - incrementa `TokenVersion`
+
+  El cambio exitoso invalida el JWT utilizado. El usuario debe iniciar sesión
+  nuevamente con la contraseña definitiva. Una contraseña actual incorrecta,
+  una temporal no válida o el incumplimiento de la política responden `400`
+  con un mensaje genérico.
+
+- No existe una ruta administrativa para cambiar directamente la contraseña
+  definitiva de otro usuario. El flujo administrativo admitido es
+  `restablecer-password`, seguido del cambio obligatorio realizado por el
+  propio usuario.
 
 - El `POST /api/usuarios/{id}/desbloquear` limpia `IntentosFallidos`,
   `BloqueadoHasta` y `UltimoIntentoFallido` sin tocar la `PasswordHash` ni
@@ -295,20 +309,60 @@ BloqueadoHasta
 UltimoIntentoFallido
 ```
 
-- En login, la verificación disponible en la capa de servicio controla
-  el bloqueo por cuenta. La política recomendada es 5 fallos y `15` minutos
-  de bloqueo para los usuarios de acceso administrativo (`ADMIN` y `RRHH`).
-  `SuperAdmin` prioriza el control de acceso por tasa y registro de seguridad
-  y evita un bloqueo total de administración.
+- En login, 5 verificaciones fallidas establecen un bloqueo de 15 minutos.
+  Actualmente este comportamiento también alcanza a `SuperAdmin`. El contador
+  se actualiza con la entidad de EF y no mediante un incremento SQL atómico.
+  Login devuelve `401` tanto para credenciales inválidas como para una cuenta
+  bloqueada o una contraseña temporal vencida/no válida.
 
 - El flujo de cambio obligatorio emite un JWT con el claim
-  `requiere_cambio_password=true`. Ese token queda restringido al cambio de
-  contraseña y al cierre de sesión; el resto de endpoints se rechaza con la
-  policy de autorización centralizada.
+  `requiere_cambio_password=true`. Un middleware central consulta el estado
+  actual del usuario y permite a ese JWT únicamente
+  `POST /api/auth/cambiar-password`; los demás endpoints web protegidos
+  responden `403`. Los endpoints anónimos y los tokens `token_use=agent` no
+  quedan sujetos a esta restricción.
 
-- La invalidación de sesiones se apoya en `TokenVersion` incluido en el token
-  y actualizado al restablecer o cambiar la contraseña, para impedir que un
-  JWT anterior siga operativo.
+- Cada endpoint protegido valida los JWT `token_use=web` contra la base:
+  `NameIdentifier` debe identificar un usuario existente y activo, y el claim
+  `token_version` debe ser entero y coincidir con `Usuario.TokenVersion`. Un
+  claim ausente, inválido o diferente responde `401`. Esta validación no se
+  aplica a tokens `token_use=agent`.
+
+- Este parche no incorpora rate limiting, respuestas `423`/`429`, incremento
+  atómico de intentos ni un rediseño general del lockout. Esos puntos quedan
+  como deuda técnica posterior.
+
+#### Actualización de esquema de seguridad
+
+El script versionado
+`database/20260910_usuario_seguridad.sql` agrega de forma idempotente:
+
+```text
+RequiereCambioPassword
+IntentosFallidos
+BloqueadoHasta
+UltimoIntentoFallido
+PasswordTemporalVenceEn
+PasswordTemporalUsada
+TokenVersion
+```
+
+Es compatible con MySQL 8.0.42 y consulta `information_schema.COLUMNS` antes
+de cada `ALTER TABLE`; no depende de `ADD COLUMN IF NOT EXISTS`. Puede
+ejecutarse sobre la tabla original, sobre el servidor que ya tiene las
+primeras seis columnas y más de una vez, sin eliminar usuarios.
+
+Antes de ejecutarlo se debe realizar y verificar un respaldo. El orden de
+despliegue es **esquema antes que binario**. Después se debe ejecutar la
+consulta de verificación incluida en el mismo archivo. Los JWT web existentes
+sin `token_version` serán rechazados por el binario nuevo, por lo que los
+usuarios deberán iniciar sesión nuevamente.
+
+El rollback manual está documentado al final del script. El rollback seguro del
+binario conserva este esquema aditivo: `dbbabd8` ya mapea `TokenVersion` y no
+puede funcionar si se elimina esa columna. Solo debe quitarse una columna
+después de desplegar una versión que ya no la mapee; no deben eliminarse las
+primeras seis columnas que ya existían en el servidor actual.
 
 ### Sucursales
 

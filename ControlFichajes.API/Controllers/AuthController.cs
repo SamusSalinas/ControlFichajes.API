@@ -64,7 +64,7 @@ namespace ControlFichajes.API.Controllers
             var ok = await _authService.CambiarPasswordAsync(usuarioId, request);
             return ok
                 ? Ok(new { mensaje = "Contraseña cambiada correctamente." })
-                : BadRequest(new { mensaje = "La contraseña nueva no cumple el contrato." });
+                : BadRequest(new { mensaje = "No se pudo cambiar la contraseña." });
         }
 
     }

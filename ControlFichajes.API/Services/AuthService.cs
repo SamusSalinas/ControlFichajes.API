@@ -57,6 +57,9 @@ namespace ControlFichajes.API.Services
                 return null;
             }
 
+            if (usuario.RequiereCambioPassword && !PasswordTemporalVigente(usuario, DateTime.UtcNow))
+                return null;
+
             usuario.IntentosFallidos = 0;
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
@@ -180,11 +183,14 @@ namespace ControlFichajes.API.Services
                 return false;
 
             var usuario = await _context.Usuario.FindAsync(usuarioId);
-            if (usuario == null)
+            if (usuario == null || !usuario.Activo)
                 return false;
 
             var actualOk = _passwordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, request.PasswordActual);
-            if (actualOk != PasswordVerificationResult.Success)
+            if (actualOk == PasswordVerificationResult.Failed)
+                return false;
+
+            if (usuario.RequiereCambioPassword && !PasswordTemporalVigente(usuario, DateTime.UtcNow))
                 return false;
 
             if (string.Equals(request.NuevaPassword, request.PasswordActual, StringComparison.Ordinal))
@@ -249,10 +255,34 @@ namespace ControlFichajes.API.Services
 
         private static string GenerarPasswordTemporal()
         {
-            var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(18))
-                .Replace("+", "A").Replace("/", "B")
-                .Replace("=", "C").Trim();
-            return $"Temp-{token[..12]}!";
+            const string letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+            const string digits = "23456789";
+            const string specials = "!@#$%*-_";
+            const string all = letters + digits + specials;
+            const int length = 16;
+
+            var password = new char[length];
+            password[0] = letters[RandomNumberGenerator.GetInt32(letters.Length)];
+            password[1] = digits[RandomNumberGenerator.GetInt32(digits.Length)];
+            password[2] = specials[RandomNumberGenerator.GetInt32(specials.Length)];
+
+            for (var index = 3; index < password.Length; index++)
+                password[index] = all[RandomNumberGenerator.GetInt32(all.Length)];
+
+            for (var index = password.Length - 1; index > 0; index--)
+            {
+                var swapIndex = RandomNumberGenerator.GetInt32(index + 1);
+                (password[index], password[swapIndex]) = (password[swapIndex], password[index]);
+            }
+
+            return new string(password);
+        }
+
+        private static bool PasswordTemporalVigente(Usuario usuario, DateTime ahora)
+        {
+            return !usuario.PasswordTemporalUsada &&
+                usuario.PasswordTemporalVenceEn.HasValue &&
+                usuario.PasswordTemporalVenceEn.Value > ahora;
         }
 
         private AuthResponseDto CrearRespuesta(Usuario usuario)
