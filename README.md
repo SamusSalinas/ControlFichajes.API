@@ -193,7 +193,11 @@ POST /api/empresas
 ### Usuarios
 
 ```text
-POST /api/usuarios
+GET    /api/usuarios
+POST   /api/usuarios
+POST   /api/usuarios/{id}/restablecer-password
+POST   /api/usuarios/{id}/desbloquear
+POST   /api/auth/cambiar-password
 ```
 
 - Registra un usuario de la empresa autenticada.
@@ -201,6 +205,69 @@ POST /api/usuarios
 - `ADMIN` solo puede crear usuarios de su propia empresa; `SuperAdmin` debe
   seleccionar la empresa mediante `X-Empresa-Id`.
 - Los roles permitidos son `ADMIN` y `RRHH`.
+- El `GET /api/usuarios` expone un listado seguro con un DTO mínimo que no
+  devuelve `PasswordHash`, secretos, `Jwt`, ni contraseñas temporales.
+- El listado devuelve exclusivamente:
+
+```json
+{
+  "id": 1,
+  "empresaId": 1,
+  "nombreUsuario": "Juan Pérez",
+  "correo": "juan@empresa.local",
+  "rol": "RRHH",
+  "activo": true,
+  "requiereCambioPassword": false
+}
+```
+
+- Permisos de lectura:
+  - `SuperAdmin`: puede consultar usuarios de todas las empresas o aplicar un
+    `empresaId` por query y, si quiere fijar contexto global para inspección,
+    usar `X-Empresa-Id`.
+  - `ADMIN`: solo usuarios de su propia empresa detectada desde `empresa_id`
+    del JWT.
+  - `RRHH`: sin acceso al listado administrativo.
+
+- Para `SuperAdmin`, el contexto es el que llega por `X-Empresa-Id`; si el
+  header no lleva empresa válida, se devuelve contexto global y el contrato
+  queda vacío de sesgo de tenant. Para `ADMIN` y `RRHH`, el `empresa_id` del
+  JWT es el único contexto aceptado.
+
+- El `POST /api/usuarios/{id}/restablecer-password` crea una contraseña
+  temporal aleatoria, genera el hash de forma segura y responde una sola vez
+  con el valor temporal claro. La contraseña temporal:
+
+  - se marca con `RequiereCambioPassword = true`
+  - tiene vencimiento por `PasswordTemporalVenceEn`
+  - queda invalidada al cambiar la clave final
+  - se evita registrar el secreto en logs
+
+- El `POST /api/auth/cambiar-password` es la ruta de primer ingreso y cambio
+  obligatorio. La contraseña nueva debe cumplir el contrato mínimo:
+
+  - 8 a 20 caracteres
+  - al menos una letra
+  - al menos un número
+  - al menos un carácter especial
+  - sin espacios
+
+- El `POST /api/usuarios/{id}/desbloquear` limpia `IntentosFallidos`,
+  `BloqueadoHasta` y `UltimoIntentoFallido` sin tocar la `PasswordHash`.
+
+- El bloqueo de cuentas se asegura con:
+
+```text
+IntentosFallidos
+BloqueadoHasta
+UltimoIntentoFallido
+```
+
+- En login, la verificación disponible en la capa de servicio controla
+  el bloqueo por cuenta. La política recomendada es 5 fallos y `15` minutos
+  de bloqueo para los usuarios de acceso administrativo (`ADMIN` y `RRHH`).
+  `SuperAdmin` prioriza el control de acceso por tasa y registro de seguridad
+  y evita un bloqueo total de administración.
 
 ### Sucursales
 

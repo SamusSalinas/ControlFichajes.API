@@ -131,6 +131,168 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task LoginAsync_UsuarioBloqueadoPorIntentosFallidos_RetornaNull()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "Admin bloqueado",
+            Correo = "bloqueado@empresa.com",
+            Rol = "ADMIN",
+            Activo = true,
+            IntentosFallidos = 5,
+            BloqueadoHasta = DateTime.UtcNow.AddMinutes(15),
+            UltimoIntentoFallido = DateTime.UtcNow.AddMinutes(-1)
+        };
+        usuario.PasswordHash = new PasswordHasher<Usuario>()
+            .HashPassword(usuario, "Password123!");
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var result = await service.LoginAsync(new LoginRequestDto
+        {
+            Email = usuario.Correo,
+            Password = "Password123!"
+        });
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ListarUsuariosAsync_FiltraPorEmpresaYDevuelveDtoSeguro()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        context.Usuario.AddRange(
+            new Usuario
+            {
+                EmpresaId = 1,
+                NombreUsuario = "Admin A",
+                Correo = "admin.a@empresa.com",
+                Rol = AppRoles.Admin,
+                Activo = true,
+                PasswordHash = new PasswordHasher<Usuario>().HashPassword(new Usuario(), "Password123!")
+            },
+            new Usuario
+            {
+                EmpresaId = 2,
+                NombreUsuario = "Admin B",
+                Correo = "admin.b@empresa.com",
+                Rol = AppRoles.Admin,
+                Activo = true,
+                PasswordHash = new PasswordHasher<Usuario>().HashPassword(new Usuario(), "Password123!")
+            });
+
+        await context.SaveChangesAsync();
+
+        var usuarios = (await service.ListarUsuariosAsync(1, null, null, null, true)).ToList();
+
+        Assert.Single(usuarios);
+        Assert.Equal(1, usuarios[0].EmpresaId);
+        Assert.Equal("admin.a@empresa.com", usuarios[0].Correo);
+        Assert.False(usuarios[0].RequiereCambioPassword);
+        Assert.Equal("ADMIN", usuarios[0].Rol);
+    }
+
+    [Fact]
+    public async Task RestablecerPasswordAsync_GeneraPasswordTemporalYMarcaCambioObligatorio()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "RRHH",
+            Correo = "rrhh@empresa.com",
+            Rol = AppRoles.Rrhh,
+            Activo = true,
+            PasswordHash = new PasswordHasher<Usuario>().HashPassword(new Usuario(), "Password123!")
+        };
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var result = await service.RestablecerPasswordAsync(usuario.Id);
+
+        Assert.NotNull(result);
+        Assert.Contains("Temp-", result!.PasswordTemporal);
+        Assert.True(result.VenceEn > DateTime.UtcNow);
+
+        var persisted = await context.Usuario.SingleAsync(u => u.Id == usuario.Id);
+        Assert.True(persisted.RequiereCambioPassword);
+        Assert.False(string.IsNullOrWhiteSpace(persisted.PasswordHash));
+        Assert.Null(persisted.BloqueadoHasta);
+    }
+
+    [Fact]
+    public async Task CambiarPasswordAsync_CumpleReglasYLimpiacambioTemporal()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "RRHH",
+            Correo = "rrhh2@empresa.com",
+            Rol = AppRoles.Rrhh,
+            Activo = true,
+            RequiereCambioPassword = true,
+            PasswordHash = new PasswordHasher<Usuario>().HashPassword(new Usuario(), "Password123!")
+        };
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var ok = await service.CambiarPasswordAsync(usuario.Id, new CambiarPasswordRequestDto
+        {
+            PasswordActual = "Password123!",
+            NuevaPassword = "NuevaClave2026!",
+            ConfirmarPassword = "NuevaClave2026!"
+        });
+
+        Assert.True(ok);
+
+        var persisted = await context.Usuario.SingleAsync(u => u.Id == usuario.Id);
+        Assert.False(persisted.RequiereCambioPassword);
+        Assert.True(persisted.PasswordTemporalUsada);
+        Assert.Null(persisted.PasswordTemporalVenceEn);
+    }
+
+    [Fact]
+    public async Task DesbloquearAsync_ReiniciaContadorYBloqueo()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "RRHH",
+            Correo = "rrhh3@empresa.com",
+            Rol = AppRoles.Rrhh,
+            Activo = true,
+            IntentosFallidos = 5,
+            BloqueadoHasta = DateTime.UtcNow.AddMinutes(15),
+            UltimoIntentoFallido = DateTime.UtcNow.AddMinutes(-1),
+            PasswordHash = new PasswordHasher<Usuario>().HashPassword(new Usuario(), "Password123!")
+        };
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var ok = await service.DesbloquearAsync(usuario.Id);
+
+        Assert.True(ok);
+        var persisted = await context.Usuario.SingleAsync(u => u.Id == usuario.Id);
+        Assert.Equal(0, persisted.IntentosFallidos);
+        Assert.Null(persisted.BloqueadoHasta);
+        Assert.Null(persisted.UltimoIntentoFallido);
+    }
+
+    [Fact]
     public async Task LoginAsync_SuperAdminConAdmin123_DevuelveTokenSuperAdmin()
     {
         await using var context = CreateContext();

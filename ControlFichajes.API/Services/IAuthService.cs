@@ -6,5 +6,9 @@ namespace   ControlFichajes.API.Services
     {
         Task<AuthResponseDto?> LoginAsync(LoginRequestDto loginDto);
         Task<AuthResponseDto?> RegistrarUsuarioAsync(UsuarioRegistroDto registroDto, bool bootstrap);
+        Task<IEnumerable<UsuarioListItemDto>> ListarUsuariosAsync(int? empresaId, string? rol, string? nombreUsuario, string? correo, bool? activo);
+        Task<RestablecerPasswordResponseDto?> RestablecerPasswordAsync(int usuarioId);
+        Task<bool> CambiarPasswordAsync(int usuarioId, CambiarPasswordRequestDto request);
+        Task<bool> DesbloquearAsync(int usuarioId);
     }
 }

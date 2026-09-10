@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -50,6 +51,20 @@ namespace ControlFichajes.API.Controllers
             return token == null
                 ? Unauthorized(new { mensaje = "Credenciales de agente incorrectas." })
                 : Ok(new AuthResponseDto { Token = token, Mensaje = "Autenticación exitosa" });
+        }
+
+        [HttpPost("cambiar-password")]
+        [Authorize]
+        public async Task<IActionResult> CambiarPassword([FromBody] CambiarPasswordRequestDto request)
+        {
+            var usuarioIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!int.TryParse(usuarioIdClaim, out var usuarioId))
+                return Unauthorized(new { mensaje = "Sesión inválida." });
+
+            var ok = await _authService.CambiarPasswordAsync(usuarioId, request);
+            return ok
+                ? Ok(new { mensaje = "Contraseña cambiada correctamente." })
+                : BadRequest(new { mensaje = "La contraseña nueva no cumple el contrato." });
         }
 
     }
