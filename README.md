@@ -217,9 +217,26 @@ POST   /api/auth/cambiar-password
   "correo": "juan@empresa.local",
   "rol": "RRHH",
   "activo": true,
-  "requiereCambioPassword": false
+  "requiereCambioPassword": false,
+  "bloqueado": false,
+  "bloqueadoHasta": null
 }
 ```
+
+Matriz de alcance de administración de usuarios:
+
+- `SuperAdmin`: puede listar, restablecer y desbloquear usuarios `ADMIN` y `RRHH`
+  de cualquier empresa. No puede administrar otro `SuperAdmin` ni restablecerse
+  a sí mismo mediante la vía administrativa.
+- `ADMIN`: solo lista usuarios de su propia empresa y solo puede restablecer
+  o desbloquear usuarios `RRHH` de esa empresa; nunca puede operar sobre un
+  `ADMIN`, `SuperAdmin` ni usuarios de otra empresa.
+- `RRHH`: no tiene acceso administrativo a usuarios.
+
+Para cualquier operación por `{id}`, la API carga el usuario objetivo,
+valida su `EmpresaId` y su `Rol` antes de permitir el cambio y responde con
+`404` para recursos fuera de alcance o inexistentes, evitando enumeración de
+usuarios entre empresas.
 
 - Permisos de lectura:
   - `SuperAdmin`: puede consultar usuarios de todas las empresas o aplicar un
@@ -235,13 +252,16 @@ POST   /api/auth/cambiar-password
   JWT es el único contexto aceptado.
 
 - El `POST /api/usuarios/{id}/restablecer-password` crea una contraseña
-  temporal aleatoria, genera el hash de forma segura y responde una sola vez
-  con el valor temporal claro. La contraseña temporal:
+  temporal aleatoria con un generador criptográficamente seguro, genera el
+  hash de forma segura y responde una sola vez con el valor temporal claro.
+  La contraseña temporal:
 
   - se marca con `RequiereCambioPassword = true`
-  - tiene vencimiento por `PasswordTemporalVenceEn`
+  - se marca `PasswordTemporalUsada = false`
+  - tiene vencimiento por `PasswordTemporalVenceEn` en UTC
+  - se limpia `IntentosFallidos`, `BloqueadoHasta`, `UltimoIntentoFallido`
   - queda invalidada al cambiar la clave final
-  - se evita registrar el secreto en logs
+  - no se registra en logs, auditoría ni telemetría
 
 - El `POST /api/auth/cambiar-password` es la ruta de primer ingreso y cambio
   obligatorio. La contraseña nueva debe cumplir el contrato mínimo:
@@ -251,9 +271,21 @@ POST   /api/auth/cambiar-password
   - al menos un número
   - al menos un carácter especial
   - sin espacios
+  - la `nuevaPassword` y `confirmarPassword` deben coincidir
+  - la nueva no debe ser igual a la contraseña actual
+
+  La operación debe verificar `PasswordActual` contra `PasswordHash` antes
+  de aceptar el cambio, y al completar:
+
+  - actualiza el hash
+  - pone `RequiereCambioPassword = false`
+  - pone `PasswordTemporalUsada = true`
+  - limpia `PasswordTemporalVenceEn`
+  - limpia `IntentosFallidos`, `BloqueadoHasta`, `UltimoIntentoFallido`
 
 - El `POST /api/usuarios/{id}/desbloquear` limpia `IntentosFallidos`,
-  `BloqueadoHasta` y `UltimoIntentoFallido` sin tocar la `PasswordHash`.
+  `BloqueadoHasta` y `UltimoIntentoFallido` sin tocar la `PasswordHash` ni
+  el estado `Activo`, `RequiereCambioPassword` o `PasswordTemporalUsada`.
 
 - El bloqueo de cuentas se asegura con:
 
@@ -268,6 +300,15 @@ UltimoIntentoFallido
   de bloqueo para los usuarios de acceso administrativo (`ADMIN` y `RRHH`).
   `SuperAdmin` prioriza el control de acceso por tasa y registro de seguridad
   y evita un bloqueo total de administración.
+
+- El flujo de cambio obligatorio emite un JWT con el claim
+  `requiere_cambio_password=true`. Ese token queda restringido al cambio de
+  contraseña y al cierre de sesión; el resto de endpoints se rechaza con la
+  policy de autorización centralizada.
+
+- La invalidación de sesiones se apoya en `TokenVersion` incluido en el token
+  y actualizado al restablecer o cambiar la contraseña, para impedir que un
+  JWT anterior siga operativo.
 
 ### Sucursales
 

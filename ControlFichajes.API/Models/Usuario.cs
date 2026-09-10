@@ -44,5 +44,7 @@ namespace ControlFichajes.API.Models
         public DateTime? PasswordTemporalVenceEn { get; set; }
 
         public bool PasswordTemporalUsada { get; set; } = false;
+
+        public int TokenVersion { get; set; } = 0;
     }
 }

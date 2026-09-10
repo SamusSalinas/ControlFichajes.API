@@ -1,9 +1,12 @@
+using System.Security.Claims;
 using ControlFichajes.API.Constants;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Security;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
 
 namespace ControlFichajes.API.Controllers;
 
@@ -59,17 +62,70 @@ public class UsuariosController : ControllerBase
     [HttpPost("{id}/restablecer-password")]
     public async Task<IActionResult> RestablecerPassword(int id)
     {
-        var result = await _authService.RestablecerPasswordAsync(id);
-        return result == null
-            ? NotFound(new { mensaje = "Usuario no encontrado." })
-            : Ok(result);
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (target == null)
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        var callingUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        var operadorNombre = User.FindFirstValue(ClaimTypes.Name) ?? string.Empty;
+        var operadorEmpresa = EmpresaAccess.TryGetEmpresaId(User, out var empresaIdOp) ? empresaIdOp : 0;
+
+        if (User.IsInRole(AppRoles.SuperAdmin))
+        {
+            if (target.Rol == AppRoles.SuperAdmin || target.Id == int.Parse(callingUserId))
+                return NotFound(new { mensaje = "Usuario no encontrado." });
+
+            if (target.Rol is not (AppRoles.Admin or AppRoles.Rrhh))
+                return NotFound(new { mensaje = "Usuario no encontrado." });
+
+            var result = await _authService.RestablecerPasswordAsync(id);
+            return result == null ? NotFound(new { mensaje = "Usuario no encontrado." }) : Ok(result);
+        }
+
+        if (User.IsInRole(AppRoles.Admin))
+        {
+            if (target.EmpresaId != operadorEmpresa || target.Rol != AppRoles.Rrhh)
+                return NotFound(new { mensaje = "Usuario no encontrado." });
+
+            var result = await _authService.RestablecerPasswordAsync(id);
+            return result == null ? NotFound(new { mensaje = "Usuario no encontrado." }) : Ok(result);
+        }
+
+        return NotFound(new { mensaje = "Usuario no encontrado." });
     }
 
     [HttpPost("{id}/desbloquear")]
     public async Task<IActionResult> Desbloquear(int id)
     {
-        var ok = await _authService.DesbloquearAsync(id);
-        return ok ? Ok(new { mensaje = "Cuenta desbloqueada." }) : NotFound(new { mensaje = "Usuario no encontrado." });
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (target == null)
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        var callingUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        var operadorEmpresa = EmpresaAccess.TryGetEmpresaId(User, out var empresaIdOp) ? empresaIdOp : 0;
+
+        if (User.IsInRole(AppRoles.SuperAdmin))
+        {
+            if (target.Rol == AppRoles.SuperAdmin || target.Id == int.Parse(callingUserId))
+                return NotFound(new { mensaje = "Usuario no encontrado." });
+
+            if (target.Rol is not (AppRoles.Admin or AppRoles.Rrhh))
+                return NotFound(new { mensaje = "Usuario no encontrado." });
+
+            var ok = await _authService.DesbloquearAsync(id);
+            return ok ? Ok(new { mensaje = "Cuenta desbloqueada." }) : NotFound(new { mensaje = "Usuario no encontrado." });
+        }
+
+        if (User.IsInRole(AppRoles.Admin))
+        {
+            if (target.EmpresaId != operadorEmpresa || target.Rol != AppRoles.Rrhh)
+                return NotFound(new { mensaje = "Usuario no encontrado." });
+
+            var ok = await _authService.DesbloquearAsync(id);
+            return ok ? Ok(new { mensaje = "Cuenta desbloqueada." }) : NotFound(new { mensaje = "Usuario no encontrado." });
+        }
+
+        return NotFound(new { mensaje = "Usuario no encontrado." });
     }
 
     [HttpPost("{id}/cambiar-password")]

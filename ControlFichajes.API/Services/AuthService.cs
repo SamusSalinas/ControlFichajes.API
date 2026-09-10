@@ -123,9 +123,17 @@ namespace ControlFichajes.API.Services
                     Correo = u.Correo,
                     Rol = u.Rol,
                     Activo = u.Activo,
-                    RequiereCambioPassword = u.RequiereCambioPassword
+                    RequiereCambioPassword = u.RequiereCambioPassword,
+                    Bloqueado = u.BloqueadoHasta != null && u.BloqueadoHasta > DateTime.UtcNow,
+                    BloqueadoHasta = u.BloqueadoHasta
                 })
                 .ToListAsync();
+        }
+
+        public async Task<Usuario?> GetUsuarioByIdAsync(int usuarioId)
+        {
+            return await _context.Usuario
+                .SingleOrDefaultAsync(u => u.Id == usuarioId);
         }
 
         public async Task<RestablecerPasswordResponseDto?> RestablecerPasswordAsync(int usuarioId)
@@ -143,6 +151,7 @@ namespace ControlFichajes.API.Services
             usuario.IntentosFallidos = 0;
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
+            usuario.TokenVersion++;
 
             await _context.SaveChangesAsync();
 
@@ -174,6 +183,13 @@ namespace ControlFichajes.API.Services
             if (usuario == null)
                 return false;
 
+            var actualOk = _passwordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, request.PasswordActual);
+            if (actualOk != PasswordVerificationResult.Success)
+                return false;
+
+            if (string.Equals(request.NuevaPassword, request.PasswordActual, StringComparison.Ordinal))
+                return false;
+
             usuario.PasswordHash = _passwordHasher.HashPassword(usuario, request.NuevaPassword);
             usuario.RequiereCambioPassword = false;
             usuario.PasswordTemporalUsada = true;
@@ -181,6 +197,7 @@ namespace ControlFichajes.API.Services
             usuario.IntentosFallidos = 0;
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
+            usuario.TokenVersion++;
 
             await _context.SaveChangesAsync();
             return true;
