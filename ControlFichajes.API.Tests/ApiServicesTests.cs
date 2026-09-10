@@ -199,6 +199,68 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task ListarUsuariosAsync_ExponeEstadoDeBloqueoYFechaSeguraEnDto()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        context.Usuario.Add(new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "RRHH Bloqueado",
+            Correo = "rrhh.bloqueado@empresa.com",
+            Rol = AppRoles.Rrhh,
+            Activo = true,
+            BloqueadoHasta = DateTime.UtcNow.AddMinutes(20),
+            PasswordHash = new PasswordHasher<Usuario>().HashPassword(new Usuario(), "Password123!")
+        });
+        await context.SaveChangesAsync();
+
+        var usuarios = (await service.ListarUsuariosAsync(1, null, null, null, true)).ToList();
+
+        var usuario = Assert.Single(usuarios);
+        Assert.True(usuario.Bloqueado);
+        Assert.NotNull(usuario.BloqueadoHasta);
+    }
+
+    [Fact]
+    public async Task CambiarPasswordAsync_ConPasswordActualIncorrecta_NoActualizaPassword()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "RRHH",
+            Correo = "rrhh2@empresa.com",
+            Rol = AppRoles.Rrhh,
+            Activo = true,
+            RequiereCambioPassword = true,
+            PasswordHash = new PasswordHasher<Usuario>().HashPassword(new Usuario(), "Password123!")
+        };
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var ok = await service.CambiarPasswordAsync(usuario.Id, new CambiarPasswordRequestDto
+        {
+            PasswordActual = "PasswordIncorrecta!",
+            NuevaPassword = "NuevaClave2026!",
+            ConfirmarPassword = "NuevaClave2026!"
+        });
+
+        Assert.False(ok);
+
+        var persisted = await context.Usuario.SingleAsync(u => u.Id == usuario.Id);
+        var verified = new PasswordHasher<Usuario>().VerifyHashedPassword(
+            persisted,
+            persisted.PasswordHash,
+            "Password123!");
+
+        Assert.Equal(PasswordVerificationResult.Success, verified);
+    }
+
+    [Fact]
     public async Task RestablecerPasswordAsync_GeneraPasswordTemporalYMarcaCambioObligatorio()
     {
         await using var context = CreateContext();

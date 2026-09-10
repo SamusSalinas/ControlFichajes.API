@@ -92,8 +92,12 @@ public sealed class JwtTokenService : ITokenService
             new(ClaimTypes.Name, usuario.NombreUsuario),
             new(ClaimTypes.Email, usuario.Correo),
             new(ClaimTypes.Role, role),
-            new("token_use", "web")
+            new("token_use", "web"),
+            new("token_version", usuario.TokenVersion.ToString())
         };
+
+        if (usuario.RequiereCambioPassword)
+            claims.Add(new Claim("requiere_cambio_password", "true"));
 
         if (!AppRoles.IsSuperAdmin(role))
             claims.Add(new Claim("empresa_id", usuario.EmpresaId.ToString()));
