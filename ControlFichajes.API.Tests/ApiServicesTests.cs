@@ -162,6 +162,41 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task LoginAsync_ConCambioObligatorio_EmiteClaimsDeRestriccionYVersion()
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context);
+        var usuario = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "Usuario temporal",
+            Correo = "temporal@empresa.com",
+            Rol = AppRoles.Rrhh,
+            Activo = true,
+            RequiereCambioPassword = true,
+            PasswordTemporalUsada = false,
+            PasswordTemporalVenceEn = DateTime.UtcNow.AddHours(1),
+            TokenVersion = 4
+        };
+        usuario.PasswordHash = new PasswordHasher<Usuario>()
+            .HashPassword(usuario, "Temporal123!");
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+
+        var result = await service.LoginAsync(new LoginRequestDto
+        {
+            Email = usuario.Correo,
+            Password = "Temporal123!"
+        });
+
+        Assert.NotNull(result);
+        Assert.True(result!.RequiereCambioPassword);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(result.Token);
+        Assert.Equal("true", token.Claims.Single(c => c.Type == "requiere_cambio_password").Value);
+        Assert.Equal("4", token.Claims.Single(c => c.Type == "token_version").Value);
+    }
+
+    [Fact]
     public async Task ListarUsuariosAsync_FiltraPorEmpresaYDevuelveDtoSeguro()
     {
         await using var context = CreateContext();
@@ -281,7 +316,7 @@ public class AuthServiceTests
         var result = await service.RestablecerPasswordAsync(usuario.Id);
 
         Assert.NotNull(result);
-        Assert.Contains("Temp-", result!.PasswordTemporal);
+        Assert.InRange(result!.PasswordTemporal.Length, 12, 20);
         Assert.True(result.VenceEn > DateTime.UtcNow);
 
         var persisted = await context.Usuario.SingleAsync(u => u.Id == usuario.Id);
@@ -304,6 +339,8 @@ public class AuthServiceTests
             Rol = AppRoles.Rrhh,
             Activo = true,
             RequiereCambioPassword = true,
+            PasswordTemporalUsada = false,
+            PasswordTemporalVenceEn = DateTime.UtcNow.AddHours(1),
             PasswordHash = new PasswordHasher<Usuario>().HashPassword(new Usuario(), "Password123!")
         };
         context.Usuario.Add(usuario);
@@ -836,7 +873,7 @@ public class UsuariosControllerTests
         return new UsuarioRegistroDto
         {
             EmpresaId = empresaId,
-            NombreUsuario = "Nuevo usuario",
+            NombreUsuario = "nuevo.usuario",
             Email = $"nuevo-{empresaId}@empresa.com",
             Password = "Password123!",
             Rol = AppRoles.Rrhh
@@ -872,15 +909,17 @@ public class UsuariosControllerTests
     }
 
     [Fact]
-    public async Task Crear_AdminNoPuedeCrearUsuarioEnOtraEmpresa()
+    public async Task Crear_AdminIgnoraEmpresaIdDelBodyYCreaRrhhEnEmpresaDelClaim()
     {
         await using var context = CreateContext();
         var controller = CrearController(context, CrearUsuario(AppRoles.Admin, empresaId: 1));
 
         var result = await controller.Crear(CrearRequest(2));
 
-        Assert.IsType<ForbidResult>(result);
-        Assert.Empty(await context.Usuario.ToListAsync());
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(result).StatusCode);
+        var creado = Assert.Single(await context.Usuario.ToListAsync());
+        Assert.Equal(1, creado.EmpresaId);
+        Assert.Equal(AppRoles.Rrhh, creado.Rol);
     }
 
     [Fact]

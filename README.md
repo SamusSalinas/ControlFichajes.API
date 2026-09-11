@@ -148,6 +148,7 @@ GET   /api/agentes
 GET   /api/agentes/{id}
 POST  /api/agentes/{id}/rotar-secret
 PATCH /api/agentes/{id}/desactivar
+GET   /api/agentes/sucursal
 POST  /api/agentes/{id}/heartbeat
 ```
 
@@ -158,6 +159,19 @@ El login de agente recibe `clientId` y `clientSecret` y devuelve un JWT con:
 - `empresa_id`
 - `sucursal_id`
 - rol `AGENTE_SUCURSAL`
+
+Además de los endpoints de gestión, el agente autenticado puede consultar su
+sucursal asociada mediante:
+
+```http
+GET /api/agentes/sucursal
+Authorization: Bearer <token-agent>
+```
+
+La respuesta reutiliza el DTO de sucursal y devuelve `serialLector` para que
+la aplicación local pueda preguntar cuál es el lector de la sucursal a la que
+está ligada, sin exigir un JWT web administrativo ni subvertir el tenant de la
+empresa.
 
 ```http
 POST /api/auth/agente
@@ -195,16 +209,26 @@ POST /api/empresas
 ```text
 GET    /api/usuarios
 POST   /api/usuarios
+PATCH  /api/usuarios/{id}/estado
+PATCH  /api/usuarios/{id}/rol
 POST   /api/usuarios/{id}/restablecer-password
 POST   /api/usuarios/{id}/desbloquear
 POST   /api/auth/cambiar-password
 ```
 
+No existe `DELETE /api/usuarios/{id}` ni baja física. La baja se representa con
+`Activo = false` y la reactivación con `Activo = true`. La cuenta inactiva
+conserva identidad, empresa, rol, fichadas, relaciones e historial.
+
 - Registra un usuario de la empresa autenticada.
 - Puede ejecutarlo un usuario con rol `ADMIN` o `SuperAdmin`.
-- `ADMIN` solo puede crear usuarios de su propia empresa; `SuperAdmin` debe
-  seleccionar la empresa mediante `X-Empresa-Id`.
-- Los roles permitidos son `ADMIN` y `RRHH`.
+- `ADMIN` solo puede crear usuarios `RRHH` de su propia empresa; el `empresaId`
+  del body se ignora y se fuerza el `empresa_id` del JWT. Un `"rol": "ADMIN"`
+  enviado por `ADMIN` se rechaza con `400`.
+- `SuperAdmin` debe seleccionar la empresa mediante `X-Empresa-Id` coincidente
+  con `body.empresaId` y puede crear `ADMIN` o `RRHH`.
+- Los roles permitidos en alta y en cambio de rol son `ADMIN` y `RRHH`. Nadie
+  puede crear ni asignar `SuperAdmin` desde estos endpoints.
 - El `GET /api/usuarios` expone un listado seguro con un DTO mínimo que no
   devuelve `PasswordHash`, secretos, `Jwt`, ni contraseñas temporales.
 - El listado devuelve exclusivamente:
@@ -225,18 +249,82 @@ POST   /api/auth/cambiar-password
 
 Matriz de alcance de administración de usuarios:
 
-- `SuperAdmin`: puede listar, restablecer y desbloquear usuarios `ADMIN` y `RRHH`
-  de cualquier empresa. No puede administrar otro `SuperAdmin` ni restablecerse
-  a sí mismo mediante la vía administrativa.
-- `ADMIN`: solo lista usuarios de su propia empresa y solo puede restablecer
-  o desbloquear usuarios `RRHH` de esa empresa; nunca puede operar sobre un
-  `ADMIN`, `SuperAdmin` ni usuarios de otra empresa.
+- `SuperAdmin`: puede listar, crear, cambiar estado, cambiar rol (`ADMIN` ↔
+  `RRHH`), restablecer y desbloquear usuarios `ADMIN` y `RRHH` de cualquier
+  empresa. No puede administrar otro `SuperAdmin`, no puede operarse a sí
+  mismo ni crear o asignar `SuperAdmin`.
+- `ADMIN`: solo lista usuarios de su propia empresa. Puede crear, desactivar,
+  reactivar, restablecer y desbloquear usuarios `RRHH` de esa empresa. No
+  puede cambiar roles, crear `ADMIN`, ni operar sobre un `ADMIN`, `SuperAdmin`
+  u otra empresa.
 - `RRHH`: no tiene acceso administrativo a usuarios.
 
-Para cualquier operación por `{id}`, la API carga el usuario objetivo,
-valida su `EmpresaId` y su `Rol` antes de permitir el cambio y responde con
-`404` para recursos fuera de alcance o inexistentes, evitando enumeración de
-usuarios entre empresas.
+Para cualquier operación por `{id}`, la API carga el usuario objetivo desde
+la base, valida el operador por claims (`TryParse`) y el alcance del objetivo
+antes de permitir el cambio. Fuera de alcance o inexistente responde `404`.
+`ADMIN` que intenta `PATCH /rol` sobre un `RRHH` de su empresa recibe `403`.
+Los DTO de estado y rol no admiten cambio de empresa.
+
+`SuperAdmin` no necesita `X-Empresa-Id` para `PATCH /estado`, `PATCH /rol`,
+`POST /restablecer-password` ni `POST /desbloquear`. Ese header sí es
+obligatorio y debe coincidir con el body en `POST /api/usuarios`.
+
+#### Cambio de estado
+
+```http
+PATCH /api/usuarios/{id}/estado
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "activo": false }
+```
+
+El mismo endpoint reactiva con `"activo": true`. El campo es obligatorio; un
+body vacío o `activo: null` responde `400`.
+
+#### Cambio de rol
+
+```http
+PATCH /api/usuarios/{id}/rol
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "rol": "RRHH" }
+```
+
+Valores admitidos: `ADMIN` y `RRHH` (se normalizan recortando espacios y
+ignorando mayúsculas). `SuperAdmin` y valores desconocidos responden `400`.
+Solo `SuperAdmin` puede ejecutar este endpoint.
+
+Ambos PATCH responden `200` con el DTO seguro de listado:
+
+```json
+{
+  "mensaje": "Usuario actualizado correctamente.",
+  "usuario": {
+    "id": 10,
+    "empresaId": 2,
+    "nombreUsuario": "martin.eloy",
+    "correo": "usuario@example.test",
+    "rol": "RRHH",
+    "activo": false,
+    "requiereCambioPassword": false,
+    "bloqueado": false,
+    "bloqueadoHasta": null
+  }
+}
+```
+
+No se devuelven `PasswordHash`, JWT, temporales ni secretos. La serialización
+es camelCase.
+
+Un cambio efectivo de estado o rol incrementa `TokenVersion` una sola vez en
+la misma persistencia e invalida los JWT web anteriores. El objetivo debe
+iniciar sesión de nuevo. Un valor idéntico al actual es idempotente: no
+escribe ni incrementa `TokenVersion`. Desactivar o reactivar no modifica
+contraseña, `RequiereCambioPassword`, bloqueo ni intentos. Cambiar el rol no
+modifica empresa, estado activo, contraseña ni bloqueo. El usuario inactivo
+sigue apareciendo en `GET /api/usuarios`.
 
 - Permisos de lectura:
   - `SuperAdmin`: puede consultar usuarios de todas las empresas o aplicar un
@@ -256,11 +344,13 @@ usuarios entre empresas.
   hash de forma segura y responde una sola vez con el valor temporal claro.
   La contraseña temporal:
 
+  - tiene 16 caracteres, con al menos una letra, un número y un carácter
+    especial, sin espacios
   - se marca con `RequiereCambioPassword = true`
   - se marca `PasswordTemporalUsada = false`
-  - tiene vencimiento por `PasswordTemporalVenceEn` en UTC
+  - vence a las 24 horas mediante `PasswordTemporalVenceEn` en UTC
   - se limpia `IntentosFallidos`, `BloqueadoHasta`, `UltimoIntentoFallido`
-  - queda invalidada al cambiar la clave final
+  - incrementa `TokenVersion` e invalida los JWT web anteriores
   - no se registra en logs, auditoría ni telemetría
 
 - El `POST /api/auth/cambiar-password` es la ruta de primer ingreso y cambio
@@ -275,13 +365,25 @@ usuarios entre empresas.
   - la nueva no debe ser igual a la contraseña actual
 
   La operación debe verificar `PasswordActual` contra `PasswordHash` antes
-  de aceptar el cambio, y al completar:
+  de aceptar el cambio. Cuando `RequiereCambioPassword = true`, también exige
+  que la temporal no esté usada, tenga vencimiento y siga vigente. Al completar:
 
   - actualiza el hash
   - pone `RequiereCambioPassword = false`
   - pone `PasswordTemporalUsada = true`
   - limpia `PasswordTemporalVenceEn`
   - limpia `IntentosFallidos`, `BloqueadoHasta`, `UltimoIntentoFallido`
+  - incrementa `TokenVersion`
+
+  El cambio exitoso invalida el JWT utilizado. El usuario debe iniciar sesión
+  nuevamente con la contraseña definitiva. Una contraseña actual incorrecta,
+  una temporal no válida o el incumplimiento de la política responden `400`
+  con un mensaje genérico.
+
+- No existe una ruta administrativa para cambiar directamente la contraseña
+  definitiva de otro usuario. El flujo administrativo admitido es
+  `restablecer-password`, seguido del cambio obligatorio realizado por el
+  propio usuario.
 
 - El `POST /api/usuarios/{id}/desbloquear` limpia `IntentosFallidos`,
   `BloqueadoHasta` y `UltimoIntentoFallido` sin tocar la `PasswordHash` ni
@@ -295,20 +397,62 @@ BloqueadoHasta
 UltimoIntentoFallido
 ```
 
-- En login, la verificación disponible en la capa de servicio controla
-  el bloqueo por cuenta. La política recomendada es 5 fallos y `15` minutos
-  de bloqueo para los usuarios de acceso administrativo (`ADMIN` y `RRHH`).
-  `SuperAdmin` prioriza el control de acceso por tasa y registro de seguridad
-  y evita un bloqueo total de administración.
+- En login, 5 verificaciones fallidas establecen un bloqueo de 15 minutos.
+  Actualmente este comportamiento también alcanza a `SuperAdmin`. El contador
+  se actualiza con la entidad de EF y no mediante un incremento SQL atómico.
+  Login devuelve `401` tanto para credenciales inválidas como para una cuenta
+  bloqueada o una contraseña temporal vencida/no válida.
 
 - El flujo de cambio obligatorio emite un JWT con el claim
-  `requiere_cambio_password=true`. Ese token queda restringido al cambio de
-  contraseña y al cierre de sesión; el resto de endpoints se rechaza con la
-  policy de autorización centralizada.
+  `requiere_cambio_password=true`. Un middleware central consulta el estado
+  actual del usuario y permite a ese JWT únicamente
+  `POST /api/auth/cambiar-password`; los demás endpoints web protegidos
+  responden `403`. Los endpoints anónimos y los tokens `token_use=agent` no
+  quedan sujetos a esta restricción.
 
-- La invalidación de sesiones se apoya en `TokenVersion` incluido en el token
-  y actualizado al restablecer o cambiar la contraseña, para impedir que un
-  JWT anterior siga operativo.
+- Cada endpoint protegido valida los JWT `token_use=web` contra la base:
+  `NameIdentifier` debe identificar un usuario existente y activo, y el claim
+  `token_version` debe ser entero y coincidir con `Usuario.TokenVersion`. Un
+  claim ausente, inválido o diferente responde `401`. Esta validación no se
+  aplica a tokens `token_use=agent`.
+
+- Este parche no incorpora rate limiting, respuestas `423`/`429`, incremento
+  atómico de intentos ni un rediseño general del lockout. Esos puntos quedan
+  como deuda técnica posterior.
+
+#### Actualización de esquema de seguridad
+
+El script versionado
+`database/20260910_usuario_seguridad.sql` agrega de forma idempotente:
+
+```text
+RequiereCambioPassword
+IntentosFallidos
+BloqueadoHasta
+UltimoIntentoFallido
+PasswordTemporalVenceEn
+PasswordTemporalUsada
+TokenVersion
+```
+
+Es compatible con MySQL 8.0.42 y consulta `information_schema.COLUMNS` antes
+de cada `ALTER TABLE`; no depende de `ADD COLUMN IF NOT EXISTS`. Puede
+ejecutarse sobre la tabla original, sobre el servidor que ya tiene las
+primeras seis columnas y más de una vez, sin eliminar usuarios.
+
+Antes de ejecutarlo se debe realizar y verificar un respaldo. El orden de
+despliegue es **backup → SQL → API → frontend**. El esquema (`TokenVersion` y
+el resto de columnas de este script) debe existir antes del binario de API;
+el frontend se publica después. Después del SQL se debe ejecutar la consulta
+de verificación incluida en el mismo archivo. Los JWT web existentes sin
+`token_version` serán rechazados por el binario nuevo, por lo que los
+usuarios deberán iniciar sesión nuevamente.
+
+El rollback manual está documentado al final del script. El rollback seguro del
+binario conserva este esquema aditivo: `dbbabd8` ya mapea `TokenVersion` y no
+puede funcionar si se elimina esa columna. Solo debe quitarse una columna
+después de desplegar una versión que ya no la mapee; no deben eliminarse las
+primeras seis columnas que ya existían en el servidor actual.
 
 ### Sucursales
 
