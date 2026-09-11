@@ -120,6 +120,25 @@ public sealed class AgenteService : IAgenteService
         };
     }
 
+    public async Task<SucursalDto?> ObtenerSucursalPorAgenteAsync(int agenteId, int sucursalId)
+    {
+        var agente = await _context.AgenteInstalacion
+            .AsNoTracking()
+            .Include(a => a.Sucursal)
+            .FirstOrDefaultAsync(a => a.Id == agenteId && a.SucursalId == sucursalId && a.Activo);
+
+        if (agente?.Sucursal == null)
+            return null;
+
+        return new SucursalDto
+        {
+            Id = agente.Sucursal.Id,
+            Nombre = agente.Sucursal.Nombre,
+            EmpresaId = agente.Sucursal.EmpresaId,
+            SerialLector = agente.Sucursal.SerialLector
+        };
+    }
+
     private IQueryable<AgenteInstalacion> Query()
     {
         return _context.AgenteInstalacion

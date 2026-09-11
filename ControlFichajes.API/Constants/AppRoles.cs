@@ -10,4 +10,23 @@ public static class AppRoles
     {
         return string.Equals(role?.Trim(), SuperAdmin, StringComparison.OrdinalIgnoreCase);
     }
+
+    public static bool TryNormalizeAssignableRole(string? role, out string normalized)
+    {
+        var value = role?.Trim() ?? string.Empty;
+        if (string.Equals(value, Admin, StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = Admin;
+            return true;
+        }
+
+        if (string.Equals(value, Rrhh, StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = Rrhh;
+            return true;
+        }
+
+        normalized = string.Empty;
+        return false;
+    }
 }

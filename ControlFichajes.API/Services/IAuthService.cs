@@ -12,5 +12,10 @@ namespace   ControlFichajes.API.Services
         Task<RestablecerPasswordResponseDto?> RestablecerPasswordAsync(int usuarioId);
         Task<bool> CambiarPasswordAsync(int usuarioId, CambiarPasswordRequestDto request);
         Task<bool> DesbloquearAsync(int usuarioId);
+        Task<UsuarioListItemDto?> CambiarEstadoAsync(int usuarioId, bool activo);
+        Task<UsuarioListItemDto?> CambiarRolAsync(int usuarioId, string rol);
+        Task<IdentidadUpdateResult> CambiarIdentidadAsync(int usuarioId, string? nombreUsuario, string? correo);
     }
+
+    public readonly record struct IdentidadUpdateResult(int StatusCode, string Mensaje, UsuarioListItemDto? Usuario);
 }

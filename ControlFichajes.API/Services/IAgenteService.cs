@@ -11,4 +11,5 @@ public interface IAgenteService
     Task<bool> DesactivarAsync(int id);
     Task<string?> AutenticarAsync(AgenteLoginDto request);
     Task<AgenteHeartbeatDto?> RegistrarHeartbeatAsync(int id, AgenteHeartbeatDto request);
+    Task<SucursalDto?> ObtenerSucursalPorAgenteAsync(int agenteId, int sucursalId);
 }
