@@ -873,7 +873,7 @@ public class UsuariosControllerTests
         return new UsuarioRegistroDto
         {
             EmpresaId = empresaId,
-            NombreUsuario = "Nuevo usuario",
+            NombreUsuario = "nuevo.usuario",
             Email = $"nuevo-{empresaId}@empresa.com",
             Password = "Password123!",
             Rol = AppRoles.Rrhh
@@ -909,15 +909,17 @@ public class UsuariosControllerTests
     }
 
     [Fact]
-    public async Task Crear_AdminNoPuedeCrearUsuarioEnOtraEmpresa()
+    public async Task Crear_AdminIgnoraEmpresaIdDelBodyYCreaRrhhEnEmpresaDelClaim()
     {
         await using var context = CreateContext();
         var controller = CrearController(context, CrearUsuario(AppRoles.Admin, empresaId: 1));
 
         var result = await controller.Crear(CrearRequest(2));
 
-        Assert.IsType<ForbidResult>(result);
-        Assert.Empty(await context.Usuario.ToListAsync());
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(result).StatusCode);
+        var creado = Assert.Single(await context.Usuario.ToListAsync());
+        Assert.Equal(1, creado.EmpresaId);
+        Assert.Equal(AppRoles.Rrhh, creado.Rol);
     }
 
     [Fact]

@@ -195,16 +195,26 @@ POST /api/empresas
 ```text
 GET    /api/usuarios
 POST   /api/usuarios
+PATCH  /api/usuarios/{id}/estado
+PATCH  /api/usuarios/{id}/rol
 POST   /api/usuarios/{id}/restablecer-password
 POST   /api/usuarios/{id}/desbloquear
 POST   /api/auth/cambiar-password
 ```
 
+No existe `DELETE /api/usuarios/{id}` ni baja física. La baja se representa con
+`Activo = false` y la reactivación con `Activo = true`. La cuenta inactiva
+conserva identidad, empresa, rol, fichadas, relaciones e historial.
+
 - Registra un usuario de la empresa autenticada.
 - Puede ejecutarlo un usuario con rol `ADMIN` o `SuperAdmin`.
-- `ADMIN` solo puede crear usuarios de su propia empresa; `SuperAdmin` debe
-  seleccionar la empresa mediante `X-Empresa-Id`.
-- Los roles permitidos son `ADMIN` y `RRHH`.
+- `ADMIN` solo puede crear usuarios `RRHH` de su propia empresa; el `empresaId`
+  del body se ignora y se fuerza el `empresa_id` del JWT. Un `"rol": "ADMIN"`
+  enviado por `ADMIN` se rechaza con `400`.
+- `SuperAdmin` debe seleccionar la empresa mediante `X-Empresa-Id` coincidente
+  con `body.empresaId` y puede crear `ADMIN` o `RRHH`.
+- Los roles permitidos en alta y en cambio de rol son `ADMIN` y `RRHH`. Nadie
+  puede crear ni asignar `SuperAdmin` desde estos endpoints.
 - El `GET /api/usuarios` expone un listado seguro con un DTO mínimo que no
   devuelve `PasswordHash`, secretos, `Jwt`, ni contraseñas temporales.
 - El listado devuelve exclusivamente:
@@ -225,18 +235,82 @@ POST   /api/auth/cambiar-password
 
 Matriz de alcance de administración de usuarios:
 
-- `SuperAdmin`: puede listar, restablecer y desbloquear usuarios `ADMIN` y `RRHH`
-  de cualquier empresa. No puede administrar otro `SuperAdmin` ni restablecerse
-  a sí mismo mediante la vía administrativa.
-- `ADMIN`: solo lista usuarios de su propia empresa y solo puede restablecer
-  o desbloquear usuarios `RRHH` de esa empresa; nunca puede operar sobre un
-  `ADMIN`, `SuperAdmin` ni usuarios de otra empresa.
+- `SuperAdmin`: puede listar, crear, cambiar estado, cambiar rol (`ADMIN` ↔
+  `RRHH`), restablecer y desbloquear usuarios `ADMIN` y `RRHH` de cualquier
+  empresa. No puede administrar otro `SuperAdmin`, no puede operarse a sí
+  mismo ni crear o asignar `SuperAdmin`.
+- `ADMIN`: solo lista usuarios de su propia empresa. Puede crear, desactivar,
+  reactivar, restablecer y desbloquear usuarios `RRHH` de esa empresa. No
+  puede cambiar roles, crear `ADMIN`, ni operar sobre un `ADMIN`, `SuperAdmin`
+  u otra empresa.
 - `RRHH`: no tiene acceso administrativo a usuarios.
 
-Para cualquier operación por `{id}`, la API carga el usuario objetivo,
-valida su `EmpresaId` y su `Rol` antes de permitir el cambio y responde con
-`404` para recursos fuera de alcance o inexistentes, evitando enumeración de
-usuarios entre empresas.
+Para cualquier operación por `{id}`, la API carga el usuario objetivo desde
+la base, valida el operador por claims (`TryParse`) y el alcance del objetivo
+antes de permitir el cambio. Fuera de alcance o inexistente responde `404`.
+`ADMIN` que intenta `PATCH /rol` sobre un `RRHH` de su empresa recibe `403`.
+Los DTO de estado y rol no admiten cambio de empresa.
+
+`SuperAdmin` no necesita `X-Empresa-Id` para `PATCH /estado`, `PATCH /rol`,
+`POST /restablecer-password` ni `POST /desbloquear`. Ese header sí es
+obligatorio y debe coincidir con el body en `POST /api/usuarios`.
+
+#### Cambio de estado
+
+```http
+PATCH /api/usuarios/{id}/estado
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "activo": false }
+```
+
+El mismo endpoint reactiva con `"activo": true`. El campo es obligatorio; un
+body vacío o `activo: null` responde `400`.
+
+#### Cambio de rol
+
+```http
+PATCH /api/usuarios/{id}/rol
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "rol": "RRHH" }
+```
+
+Valores admitidos: `ADMIN` y `RRHH` (se normalizan recortando espacios y
+ignorando mayúsculas). `SuperAdmin` y valores desconocidos responden `400`.
+Solo `SuperAdmin` puede ejecutar este endpoint.
+
+Ambos PATCH responden `200` con el DTO seguro de listado:
+
+```json
+{
+  "mensaje": "Usuario actualizado correctamente.",
+  "usuario": {
+    "id": 10,
+    "empresaId": 2,
+    "nombreUsuario": "martin.eloy",
+    "correo": "usuario@example.test",
+    "rol": "RRHH",
+    "activo": false,
+    "requiereCambioPassword": false,
+    "bloqueado": false,
+    "bloqueadoHasta": null
+  }
+}
+```
+
+No se devuelven `PasswordHash`, JWT, temporales ni secretos. La serialización
+es camelCase.
+
+Un cambio efectivo de estado o rol incrementa `TokenVersion` una sola vez en
+la misma persistencia e invalida los JWT web anteriores. El objetivo debe
+iniciar sesión de nuevo. Un valor idéntico al actual es idempotente: no
+escribe ni incrementa `TokenVersion`. Desactivar o reactivar no modifica
+contraseña, `RequiereCambioPassword`, bloqueo ni intentos. Cambiar el rol no
+modifica empresa, estado activo, contraseña ni bloqueo. El usuario inactivo
+sigue apareciendo en `GET /api/usuarios`.
 
 - Permisos de lectura:
   - `SuperAdmin`: puede consultar usuarios de todas las empresas o aplicar un
@@ -353,9 +427,11 @@ ejecutarse sobre la tabla original, sobre el servidor que ya tiene las
 primeras seis columnas y más de una vez, sin eliminar usuarios.
 
 Antes de ejecutarlo se debe realizar y verificar un respaldo. El orden de
-despliegue es **esquema antes que binario**. Después se debe ejecutar la
-consulta de verificación incluida en el mismo archivo. Los JWT web existentes
-sin `token_version` serán rechazados por el binario nuevo, por lo que los
+despliegue es **backup → SQL → API → frontend**. El esquema (`TokenVersion` y
+el resto de columnas de este script) debe existir antes del binario de API;
+el frontend se publica después. Después del SQL se debe ejecutar la consulta
+de verificación incluida en el mismo archivo. Los JWT web existentes sin
+`token_version` serán rechazados por el binario nuevo, por lo que los
 usuarios deberán iniciar sesión nuevamente.
 
 El rollback manual está documentado al final del script. El rollback seguro del

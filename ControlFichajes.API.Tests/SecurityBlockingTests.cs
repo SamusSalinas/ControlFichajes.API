@@ -457,4 +457,12 @@ public class UsuariosRouteSecurityTests
             typeof(UsuariosController).GetMethods(BindingFlags.Instance | BindingFlags.Public),
             method => method.Name == "CambiarPassword");
     }
+
+    [Fact]
+    public void DeleteUsuario_NoEstaPublicado()
+    {
+        Assert.DoesNotContain(
+            typeof(UsuariosController).GetMethods(BindingFlags.Instance | BindingFlags.Public),
+            method => method.GetCustomAttributes<HttpDeleteAttribute>(true).Any());
+    }
 }

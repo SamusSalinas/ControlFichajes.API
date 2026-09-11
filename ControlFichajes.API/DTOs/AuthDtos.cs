@@ -67,4 +67,30 @@ namespace ControlFichajes.API.DTOs
         public string PasswordTemporal { get; set; } = string.Empty;
         public DateTime VenceEn { get; set; }
     }
+
+    public class CambiarEstadoUsuarioDto
+    {
+        public bool? Activo { get; set; }
+    }
+
+    public class CambiarRolUsuarioDto
+    {
+        [MaxLength(20)]
+        public string Rol { get; set; } = string.Empty;
+    }
+
+    public class UsuarioActualizadoResponseDto
+    {
+        public string Mensaje { get; set; } = "Usuario actualizado correctamente.";
+        public UsuarioListItemDto Usuario { get; set; } = new();
+    }
+
+    public class CambiarIdentidadUsuarioDto
+    {
+        [MaxLength(50)]
+        public string NombreUsuario { get; set; } = string.Empty;
+
+        [MaxLength(100)]
+        public string Correo { get; set; } = string.Empty;
+    }
 }

@@ -3,7 +3,9 @@ using ControlFichajes.API.Constants;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
+using ControlFichajes.API.Security;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace ControlFichajes.API.Services
@@ -212,7 +214,7 @@ namespace ControlFichajes.API.Services
         public async Task<bool> DesbloquearAsync(int usuarioId)
         {
             var usuario = await _context.Usuario.FindAsync(usuarioId);
-            if (usuario == null)
+            if (usuario == null || !usuario.Activo)
                 return false;
 
             usuario.IntentosFallidos = 0;
@@ -220,6 +222,88 @@ namespace ControlFichajes.API.Services
             usuario.UltimoIntentoFallido = null;
             await _context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<UsuarioListItemDto?> CambiarEstadoAsync(int usuarioId, bool activo)
+        {
+            var usuario = await _context.Usuario.FindAsync(usuarioId);
+            if (usuario == null)
+                return null;
+
+            if (usuario.Activo == activo)
+                return ToListItem(usuario);
+
+            usuario.Activo = activo;
+            usuario.TokenVersion++;
+            await _context.SaveChangesAsync();
+            return ToListItem(usuario);
+        }
+
+        public async Task<UsuarioListItemDto?> CambiarRolAsync(int usuarioId, string rol)
+        {
+            if (!AppRoles.TryNormalizeAssignableRole(rol, out var rolNormalizado))
+                return null;
+
+            var usuario = await _context.Usuario.FindAsync(usuarioId);
+            if (usuario == null || AppRoles.IsSuperAdmin(usuario.Rol))
+                return null;
+
+            if (string.Equals(usuario.Rol, rolNormalizado, StringComparison.Ordinal))
+                return ToListItem(usuario);
+
+            usuario.Rol = rolNormalizado;
+            usuario.TokenVersion++;
+            // Deuda: el proyecto no tiene ILogger de auditoría. Registrar operador, objetivo,
+            // empresa, rol anterior, rol nuevo y fecha sin correo, JWT ni secretos.
+            await _context.SaveChangesAsync();
+            return ToListItem(usuario);
+        }
+
+        public async Task<IdentidadUpdateResult> CambiarIdentidadAsync(int usuarioId, string? nombreUsuario, string? correo)
+        {
+            if (!UsuarioIdentidadRules.TryValidateNombre(nombreUsuario, out var nombreError))
+                return new IdentidadUpdateResult(StatusCodes.Status400BadRequest, nombreError, null);
+
+            if (!UsuarioIdentidadRules.TryValidateCorreo(correo, out var correoError))
+                return new IdentidadUpdateResult(StatusCodes.Status400BadRequest, correoError, null);
+
+            var correoNormalizado = NormalizarCorreo(correo ?? string.Empty);
+
+            var usuario = await _context.Usuario.FindAsync(usuarioId);
+            if (usuario == null)
+                return new IdentidadUpdateResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null);
+
+            var correoTomado = await _context.Usuario.AnyAsync(item =>
+                item.Id != usuarioId && item.Correo == correoNormalizado);
+            if (correoTomado)
+                return new IdentidadUpdateResult(StatusCodes.Status409Conflict, UsuarioIdentidadRules.CorreoDuplicado, null);
+
+            var mismoNombre = string.Equals(usuario.NombreUsuario, nombreUsuario, StringComparison.Ordinal);
+            var mismoCorreo = string.Equals(usuario.Correo, correoNormalizado, StringComparison.Ordinal);
+            if (mismoNombre && mismoCorreo)
+                return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
+
+            usuario.NombreUsuario = nombreUsuario!;
+            usuario.Correo = correoNormalizado;
+            usuario.TokenVersion++;
+            await _context.SaveChangesAsync();
+            return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
+        }
+
+        private static UsuarioListItemDto ToListItem(Usuario usuario)
+        {
+            return new UsuarioListItemDto
+            {
+                Id = usuario.Id,
+                EmpresaId = usuario.EmpresaId,
+                NombreUsuario = usuario.NombreUsuario,
+                Correo = usuario.Correo,
+                Rol = usuario.Rol,
+                Activo = usuario.Activo,
+                RequiereCambioPassword = usuario.RequiereCambioPassword,
+                Bloqueado = usuario.BloqueadoHasta != null && usuario.BloqueadoHasta > DateTime.UtcNow,
+                BloqueadoHasta = usuario.BloqueadoHasta
+            };
         }
 
         private Usuario CrearUsuario(

@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using ControlFichajes.API.Constants;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Security;
@@ -45,11 +44,37 @@ public class UsuariosController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Crear(UsuarioRegistroDto request)
     {
-        if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || request.EmpresaId != empresaId)
+        if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
             return Forbid();
 
-        if (request.Rol is not (AppRoles.Admin or AppRoles.Rrhh))
-            return BadRequest(new { mensaje = "El rol debe ser ADMIN o RRHH." });
+        if (User.IsInRole(AppRoles.SuperAdmin))
+        {
+            if (request.EmpresaId != empresaId)
+                return Forbid();
+
+            if (!AppRoles.TryNormalizeAssignableRole(request.Rol, out var rolSuperAdmin))
+                return BadRequest(new { mensaje = "El rol debe ser ADMIN o RRHH." });
+
+            request.Rol = rolSuperAdmin;
+        }
+        else if (User.IsInRole(AppRoles.Admin))
+        {
+            request.EmpresaId = empresaId;
+            if (!string.Equals(request.Rol?.Trim(), AppRoles.Rrhh, StringComparison.OrdinalIgnoreCase))
+                return BadRequest(new { mensaje = "El rol debe ser RRHH." });
+
+            request.Rol = AppRoles.Rrhh;
+        }
+        else
+        {
+            return Forbid();
+        }
+
+        if (!UsuarioIdentidadRules.TryValidateNombre(request.NombreUsuario, out var nombreError))
+            return BadRequest(new { mensaje = nombreError });
+
+        if (!UsuarioIdentidadRules.TryValidateCorreo(request.Email, out var correoError))
+            return BadRequest(new { mensaje = correoError });
 
         var response = await _authService.RegistrarUsuarioAsync(request, bootstrap: false);
         if (response == null)
@@ -61,72 +86,112 @@ public class UsuariosController : ControllerBase
     [HttpPost("{id}/restablecer-password")]
     public async Task<IActionResult> RestablecerPassword(int id)
     {
-        var target = await _authService.GetUsuarioByIdAsync(id);
-        if (target == null)
-            return NotFound(new { mensaje = "Usuario no encontrado." });
-
-        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var callingUserId))
+        if (!UsuarioAdministracionAccess.TryGetOperadorId(User, out var operadorId))
             return Unauthorized(new { mensaje = "Sesión inválida." });
 
-        var operadorEmpresa = EmpresaAccess.TryGetEmpresaId(User, out var empresaIdOp) ? empresaIdOp : 0;
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (!UsuarioAdministracionAccess.PuedeAdministrarObjetivo(User, target, operadorId))
+            return NotFound(new { mensaje = "Usuario no encontrado." });
 
-        if (User.IsInRole(AppRoles.SuperAdmin))
-        {
-            if (target.Rol == AppRoles.SuperAdmin || target.Id == callingUserId)
-                return NotFound(new { mensaje = "Usuario no encontrado." });
-
-            if (target.Rol is not (AppRoles.Admin or AppRoles.Rrhh))
-                return NotFound(new { mensaje = "Usuario no encontrado." });
-
-            var result = await _authService.RestablecerPasswordAsync(id);
-            return result == null ? NotFound(new { mensaje = "Usuario no encontrado." }) : Ok(result);
-        }
-
-        if (User.IsInRole(AppRoles.Admin))
-        {
-            if (target.EmpresaId != operadorEmpresa || target.Rol != AppRoles.Rrhh)
-                return NotFound(new { mensaje = "Usuario no encontrado." });
-
-            var result = await _authService.RestablecerPasswordAsync(id);
-            return result == null ? NotFound(new { mensaje = "Usuario no encontrado." }) : Ok(result);
-        }
-
-        return NotFound(new { mensaje = "Usuario no encontrado." });
+        var result = await _authService.RestablecerPasswordAsync(id);
+        return result == null
+            ? NotFound(new { mensaje = "Usuario no encontrado." })
+            : Ok(result);
     }
 
     [HttpPost("{id}/desbloquear")]
     public async Task<IActionResult> Desbloquear(int id)
     {
-        var target = await _authService.GetUsuarioByIdAsync(id);
-        if (target == null)
-            return NotFound(new { mensaje = "Usuario no encontrado." });
-
-        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var callingUserId))
+        if (!UsuarioAdministracionAccess.TryGetOperadorId(User, out var operadorId))
             return Unauthorized(new { mensaje = "Sesión inválida." });
 
-        var operadorEmpresa = EmpresaAccess.TryGetEmpresaId(User, out var empresaIdOp) ? empresaIdOp : 0;
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (!UsuarioAdministracionAccess.PuedeAdministrarObjetivo(User, target, operadorId))
+            return NotFound(new { mensaje = "Usuario no encontrado." });
 
-        if (User.IsInRole(AppRoles.SuperAdmin))
+        var ok = await _authService.DesbloquearAsync(id);
+        return ok
+            ? Ok(new { mensaje = "Cuenta desbloqueada." })
+            : NotFound(new { mensaje = "Usuario no encontrado." });
+    }
+
+    [HttpPatch("{id}/estado")]
+    public async Task<IActionResult> CambiarEstado(int id, [FromBody] CambiarEstadoUsuarioDto request)
+    {
+        if (request?.Activo is not bool activo)
+            return BadRequest(new { mensaje = "El campo activo es obligatorio." });
+
+        if (!UsuarioAdministracionAccess.TryGetOperadorId(User, out var operadorId))
+            return Unauthorized(new { mensaje = "Sesión inválida." });
+
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (!UsuarioAdministracionAccess.PuedeAdministrarObjetivo(User, target, operadorId))
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        var usuario = await _authService.CambiarEstadoAsync(id, activo);
+        if (usuario == null)
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        return Ok(new UsuarioActualizadoResponseDto
         {
-            if (target.Rol == AppRoles.SuperAdmin || target.Id == callingUserId)
-                return NotFound(new { mensaje = "Usuario no encontrado." });
+            Mensaje = "Usuario actualizado correctamente.",
+            Usuario = usuario
+        });
+    }
 
-            if (target.Rol is not (AppRoles.Admin or AppRoles.Rrhh))
-                return NotFound(new { mensaje = "Usuario no encontrado." });
+    [HttpPatch("{id}/rol")]
+    public async Task<IActionResult> CambiarRol(int id, [FromBody] CambiarRolUsuarioDto request)
+    {
+        if (AppRoles.IsSuperAdmin(request?.Rol))
+            return BadRequest(new { mensaje = "El rol debe ser ADMIN o RRHH." });
 
-            var ok = await _authService.DesbloquearAsync(id);
-            return ok ? Ok(new { mensaje = "Cuenta desbloqueada." }) : NotFound(new { mensaje = "Usuario no encontrado." });
+        if (!AppRoles.TryNormalizeAssignableRole(request?.Rol, out var rol))
+            return BadRequest(new { mensaje = "El rol debe ser ADMIN o RRHH." });
+
+        if (!UsuarioAdministracionAccess.TryGetOperadorId(User, out var operadorId))
+            return Unauthorized(new { mensaje = "Sesión inválida." });
+
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (!UsuarioAdministracionAccess.PuedeAdministrarObjetivo(User, target, operadorId))
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        if (!UsuarioAdministracionAccess.PuedeCambiarRol(User, target, operadorId))
+            return Forbid();
+
+        var usuario = await _authService.CambiarRolAsync(id, rol);
+        if (usuario == null)
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        return Ok(new UsuarioActualizadoResponseDto
+        {
+            Mensaje = "Usuario actualizado correctamente.",
+            Usuario = usuario
+        });
+    }
+
+    [HttpPatch("{id}/identidad")]
+    public async Task<IActionResult> CambiarIdentidad(int id, [FromBody] CambiarIdentidadUsuarioDto request)
+    {
+        if (request is null)
+            return BadRequest(new { mensaje = "Los datos enviados no son válidos." });
+
+        if (!UsuarioAdministracionAccess.TryGetOperadorId(User, out var operadorId))
+            return Unauthorized(new { mensaje = "Sesión inválida." });
+
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (!UsuarioAdministracionAccess.PuedeAdministrarObjetivo(User, target, operadorId))
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        var result = await _authService.CambiarIdentidadAsync(id, request.NombreUsuario, request.Correo);
+        if (result.Usuario != null)
+        {
+            return StatusCode(result.StatusCode, new UsuarioActualizadoResponseDto
+            {
+                Mensaje = result.Mensaje,
+                Usuario = result.Usuario
+            });
         }
 
-        if (User.IsInRole(AppRoles.Admin))
-        {
-            if (target.EmpresaId != operadorEmpresa || target.Rol != AppRoles.Rrhh)
-                return NotFound(new { mensaje = "Usuario no encontrado." });
-
-            var ok = await _authService.DesbloquearAsync(id);
-            return ok ? Ok(new { mensaje = "Cuenta desbloqueada." }) : NotFound(new { mensaje = "Usuario no encontrado." });
-        }
-
-        return NotFound(new { mensaje = "Usuario no encontrado." });
+        return StatusCode(result.StatusCode, new { mensaje = result.Mensaje });
     }
 }
