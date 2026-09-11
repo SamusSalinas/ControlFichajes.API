@@ -148,6 +148,7 @@ GET   /api/agentes
 GET   /api/agentes/{id}
 POST  /api/agentes/{id}/rotar-secret
 PATCH /api/agentes/{id}/desactivar
+GET   /api/agentes/sucursal
 POST  /api/agentes/{id}/heartbeat
 ```
 
@@ -158,6 +159,19 @@ El login de agente recibe `clientId` y `clientSecret` y devuelve un JWT con:
 - `empresa_id`
 - `sucursal_id`
 - rol `AGENTE_SUCURSAL`
+
+Además de los endpoints de gestión, el agente autenticado puede consultar su
+sucursal asociada mediante:
+
+```http
+GET /api/agentes/sucursal
+Authorization: Bearer <token-agent>
+```
+
+La respuesta reutiliza el DTO de sucursal y devuelve `serialLector` para que
+la aplicación local pueda preguntar cuál es el lector de la sucursal a la que
+está ligada, sin exigir un JWT web administrativo ni subvertir el tenant de la
+empresa.
 
 ```http
 POST /api/auth/agente

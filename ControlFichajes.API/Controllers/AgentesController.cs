@@ -56,6 +56,20 @@ public sealed class AgentesController : ControllerBase
         return await _agenteService.DesactivarAsync(id) ? NoContent() : NotFound();
     }
 
+    [HttpGet("sucursal")]
+    [Authorize(Policy = "SoloAgente")]
+    public async Task<IActionResult> ObtenerSucursalDelAgente()
+    {
+        if (!int.TryParse(User.FindFirst("agente_id")?.Value, out var agenteId))
+            return Forbid();
+
+        if (!int.TryParse(User.FindFirst("sucursal_id")?.Value, out var sucursalId))
+            return Forbid();
+
+        var sucursal = await _agenteService.ObtenerSucursalPorAgenteAsync(agenteId, sucursalId);
+        return sucursal == null ? NotFound() : Ok(sucursal);
+    }
+
     [HttpPost("{id:int}/heartbeat")]
     [Authorize(Policy = "SoloAgente")]
     public async Task<IActionResult> Heartbeat(int id, AgenteHeartbeatDto request)
