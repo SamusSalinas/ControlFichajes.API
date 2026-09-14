@@ -454,6 +454,23 @@ puede funcionar si se elimina esa columna. Solo debe quitarse una columna
 después de desplegar una versión que ya no la mapee; no deben eliminarse las
 primeras seis columnas que ya existían en el servidor actual.
 
+#### Observaciones de fichadas
+
+Este repositorio no versiona el esquema con migraciones EF. Los cambios
+incrementales de MySQL viven en `database/YYYYMMDD_descripcion.sql`, igual
+que `database/20260910_usuario_seguridad.sql`.
+
+La tabla `FichadaObservacion` (relación 1:1 con `Fichada`) se crea con:
+
+```text
+database/20260914_fichada_observacion.sql
+database/20260914_fichada_observacion.rollback.sql
+```
+
+El script forward es idempotente, no toca `Fichada`, `Empleado` ni `Usuario`,
+y no incluye connection strings. Orden de despliegue: **backup → SQL → API**.
+No ejecutar estos scripts desde el entorno de desarrollo de esta entrega.
+
 ### Sucursales
 
 ```text
