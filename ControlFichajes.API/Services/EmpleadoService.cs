@@ -24,10 +24,19 @@ namespace ControlFichajes.API.Services
 
         public async Task<IEnumerable<EmpleadoDto>> ObtenerActivosPorEmpresaAsync(int empresaId)
         {
-            return await Proyectar(_context.Empleado
-                    .AsNoTracking()
-                    .Where(e => e.EmpresaId == empresaId && e.Activo))
-                .ToListAsync();
+            return await ObtenerPorEmpresaAsync(empresaId, incluirInactivos: false);
+        }
+
+        public async Task<IEnumerable<EmpleadoDto>> ObtenerPorEmpresaAsync(int empresaId, bool incluirInactivos = false)
+        {
+            var query = _context.Empleado
+                .AsNoTracking()
+                .Where(e => e.EmpresaId == empresaId);
+
+            if (!incluirInactivos)
+                query = query.Where(e => e.Activo);
+
+            return await Proyectar(query).ToListAsync();
         }
 
         public async Task<EmpleadoDto?> ObtenerPorIdAsync(int id)
@@ -151,6 +160,22 @@ namespace ControlFichajes.API.Services
             empleado.Activo = false;
             await _context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<ReactivarEmpleadoEstado> ReactivarAsync(int id, int empresaId)
+        {
+            var empleado = await _context.Empleado
+                .FirstOrDefaultAsync(e => e.Id == id && e.EmpresaId == empresaId);
+
+            if (empleado == null)
+                return ReactivarEmpleadoEstado.NoEncontrado;
+
+            if (empleado.Activo)
+                return ReactivarEmpleadoEstado.YaActivo;
+
+            empleado.Activo = true;
+            await _context.SaveChangesAsync();
+            return ReactivarEmpleadoEstado.Reactivado;
         }
 
         public async Task<bool> EnrolarHuellaAsync(HuellaEnrolarDto dto, int empresaId)
