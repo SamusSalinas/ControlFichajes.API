@@ -23,5 +23,7 @@ namespace ControlFichajes.API.Models
         [Required]
         [MaxLength(20)]
         public string Metodo { get; set; } = "Biometrico";
+
+        public virtual FichadaObservacion? Observacion { get; set; }
     }
 }
