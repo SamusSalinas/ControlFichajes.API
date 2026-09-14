@@ -45,12 +45,12 @@ namespace ControlFichajes.API.Controllers
 
         [HttpGet]
         [Authorize(Policy = "WebOAgente")]
-        public async Task<ActionResult<IEnumerable<EmpleadoDto>>> GetEmpleados()
+        public async Task<ActionResult<IEnumerable<EmpleadoDto>>> GetEmpleados([FromQuery] bool incluirInactivos = false)
         {
             if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
                 return Forbid();
 
-            var empleados = await _empleadoService.ObtenerActivosPorEmpresaAsync(empresaId);
+            var empleados = await _empleadoService.ObtenerPorEmpresaAsync(empresaId, incluirInactivos);
             return Ok(empleados);
         }
 
@@ -130,6 +130,26 @@ namespace ControlFichajes.API.Controllers
                 return NotFound("Empleado no encontrado o ya dado de baja.");
 
             return Ok(new { mensaje = "Empleado dado de baja exitosamente." });
+        }
+
+        [HttpPost("{id:int}/reactivar")]
+        [Authorize]
+        public async Task<IActionResult> ReactivarEmpleado(int id)
+        {
+            if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
+                return Forbid();
+
+            var resultado = await _empleadoService.ReactivarAsync(id, empresaId);
+            return resultado switch
+            {
+                ReactivarEmpleadoEstado.NoEncontrado =>
+                    NotFound("Empleado no encontrado."),
+                ReactivarEmpleadoEstado.YaActivo =>
+                    Conflict(new { mensaje = "El empleado ya está activo." }),
+                ReactivarEmpleadoEstado.Reactivado =>
+                    Ok(new { mensaje = "Empleado reactivado exitosamente." }),
+                _ => NotFound("Empleado no encontrado."),
+            };
         }
     }
 }
