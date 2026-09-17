@@ -13,10 +13,16 @@ namespace ControlFichajes.API.Controllers
         private readonly IAuthService _authService;
         private readonly IAgenteService _agenteService;
 
-        public AuthController(IAuthService authService, IAgenteService agenteService)
+        private readonly IAgenteAuthService _agenteAuthService;
+
+        public AuthController(
+            IAuthService authService, 
+            IAgenteService agenteService,
+            IAgenteAuthService agenteAuthService)
         {
             _authService = authService;
             _agenteService = agenteService;
+            _agenteAuthService = agenteAuthService;
         }
 
         [HttpPost("Login")]
@@ -47,7 +53,7 @@ namespace ControlFichajes.API.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> LoginAgente(AgenteLoginDto request)
         {
-            var token = await _agenteService.AutenticarAsync(request);
+            var token = await _agenteAuthService.AutenticarAsync(request);
             return token == null
                 ? Unauthorized(new { mensaje = "Credenciales de agente incorrectas." })
                 : Ok(new AuthResponseDto { Token = token, Mensaje = "Autenticación exitosa" });

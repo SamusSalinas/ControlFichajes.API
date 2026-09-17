@@ -45,6 +45,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IAgenteService, AgenteService>();
+builder.Services.AddScoped<IAgenteAuthService, AgenteAuthService>();
 builder.Services.AddScoped<IEmpleadoService, EmpleadoService>();
 builder.Services.AddScoped<IPasswordHasher<Usuario>, PasswordHasher<Usuario>>();
 builder.Services.AddScoped<IPasswordHasher<AgenteInstalacion>, PasswordHasher<AgenteInstalacion>>();
