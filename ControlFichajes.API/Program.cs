@@ -83,6 +83,9 @@ builder.Services.AddAuthorization(options =>
         .RequireRole("AGENTE_SUCURSAL"));
     options.AddPolicy("WebOAgente", policy => policy.RequireAssertion(context =>
         context.User.HasClaim("token_use", "web") || context.User.HasClaim("token_use", "agent")));
+    options.AddPolicy("PuedeEscribirObservacionFichada", policy => policy
+        .RequireClaim("token_use", "web")
+        .RequireRole("SuperAdmin", "ADMIN", "RRHH"));
 });
 
 var app = builder.Build();

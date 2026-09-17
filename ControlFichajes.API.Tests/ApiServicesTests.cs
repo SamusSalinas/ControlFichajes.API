@@ -1282,6 +1282,108 @@ public class EmpleadoServiceTests
     }
 
     [Fact]
+    public async Task ObtenerPorEmpresaAsync_SinIncluirInactivos_OmiteBajasLogicas()
+    {
+        await using var context = CreateContext();
+        var service = new EmpleadoService(context);
+
+        context.Empleado.AddRange(
+            new Empleado { Id = 1, EmpresaId = 1, DNI = "10000001", CUIL = "20-10000001-9", Nombre = "Activo", Apellido = "Uno", Activo = true },
+            new Empleado { Id = 2, EmpresaId = 1, DNI = "10000002", CUIL = "20-10000002-9", Nombre = "Inactivo", Apellido = "Uno", Activo = false },
+            new Empleado { Id = 3, EmpresaId = 2, DNI = "10000003", CUIL = "20-10000003-9", Nombre = "Ajeno", Apellido = "Dos", Activo = true });
+        await context.SaveChangesAsync();
+
+        var soloActivos = (await service.ObtenerPorEmpresaAsync(1)).ToList();
+        var conInactivos = (await service.ObtenerPorEmpresaAsync(1, incluirInactivos: true)).ToList();
+        var explicitFalse = (await service.ObtenerPorEmpresaAsync(1, incluirInactivos: false)).ToList();
+
+        Assert.Single(soloActivos);
+        Assert.Equal("Activo", soloActivos[0].Nombre);
+        Assert.Equal(2, conInactivos.Count);
+        Assert.DoesNotContain(conInactivos, e => e.EmpresaId != 1);
+        Assert.Single(explicitFalse);
+    }
+
+    [Fact]
+    public async Task ReactivarAsync_ConEmpleadoInactivo_SoloCambiaActivo()
+    {
+        await using var context = CreateContext();
+        var service = new EmpleadoService(context);
+
+        context.Sucursal.Add(new Sucursal { Id = 4, EmpresaId = 1, Nombre = "Sede", SerialLector = "L-4" });
+        context.Departamento.Add(new Departamento { Id = 7, Nombre = "Ops", SucursalId = 4 });
+        context.Empleado.Add(new Empleado
+        {
+            Id = 40,
+            EmpresaId = 1,
+            Legajo = "L-40",
+            DNI = "40404040",
+            CUIL = "20-40404040-9",
+            Nombre = "Nora",
+            Apellido = "Diaz",
+            SucursalId = 4,
+            DepartamentoId = 7,
+            Activo = false
+        });
+        context.Huella.Add(new Huella { Id = 8, EmpleadoId = 40, IndiceDedo = 1, TemplateBiometrico = "tpl" });
+        await context.SaveChangesAsync();
+
+        var estado = await service.ReactivarAsync(40, 1);
+
+        Assert.Equal(ReactivarEmpleadoEstado.Reactivado, estado);
+        var empleado = await context.Empleado.FindAsync(40);
+        Assert.True(empleado!.Activo);
+        Assert.Equal("Nora", empleado.Nombre);
+        Assert.Equal("40404040", empleado.DNI);
+        Assert.Equal("L-40", empleado.Legajo);
+        Assert.Equal(4, empleado.SucursalId);
+        Assert.Equal(7, empleado.DepartamentoId);
+        Assert.Equal(1, await context.Huella.CountAsync(h => h.EmpleadoId == 40));
+    }
+
+    [Fact]
+    public async Task ReactivarAsync_YaActivo_NoModifica()
+    {
+        await using var context = CreateContext();
+        var service = new EmpleadoService(context);
+        context.Empleado.Add(new Empleado
+        {
+            Id = 41,
+            EmpresaId = 1,
+            DNI = "41414141",
+            CUIL = "20-41414141-9",
+            Nombre = "Luis",
+            Apellido = "Paz",
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+
+        Assert.Equal(ReactivarEmpleadoEstado.YaActivo, await service.ReactivarAsync(41, 1));
+        Assert.True((await context.Empleado.FindAsync(41))!.Activo);
+    }
+
+    [Fact]
+    public async Task ReactivarAsync_DeOtraEmpresa_NoEncontrado()
+    {
+        await using var context = CreateContext();
+        var service = new EmpleadoService(context);
+        context.Empleado.Add(new Empleado
+        {
+            Id = 42,
+            EmpresaId = 2,
+            DNI = "42424242",
+            CUIL = "20-42424242-9",
+            Nombre = "Eva",
+            Apellido = "Sosa",
+            Activo = false
+        });
+        await context.SaveChangesAsync();
+
+        Assert.Equal(ReactivarEmpleadoEstado.NoEncontrado, await service.ReactivarAsync(42, 1));
+        Assert.False((await context.Empleado.FindAsync(42))!.Activo);
+    }
+
+    [Fact]
     public async Task EnrolarHuellaAsync_ConEmpleadoActivo_GuardaLaHuella()
     {
         await using var context = CreateContext();
