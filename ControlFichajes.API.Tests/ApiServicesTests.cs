@@ -981,12 +981,22 @@ public class AgenteServiceTests
     public async Task CrearYAutenticarAgente_EmiteClaimsDeSucursal()
     {
         await using var context = CreateContext();
-        var service = new AgenteService(
+        /*var service = new AgenteService(
             context,
             new PasswordHasher<AgenteInstalacion>(),
-            CreateTokenService());
-
-        var creado = await service.CrearAsync(new AgenteCrearDto
+            CreateTokenService());*/
+        
+        var adminService = new AgenteAdminService(
+            context,
+            new PasswordHasher<AgenteInstalacion>()
+        );
+        var authService = new AgenteAuthService(
+            context,
+            new PasswordHasher<AgenteInstalacion>(),
+            CreateTokenService()
+            
+        );
+        var creado = await adminService.CrearAsync(new AgenteCrearDto
         {
             SucursalId = 1,
             ClientId = "lector-central",
@@ -997,7 +1007,7 @@ public class AgenteServiceTests
         Assert.Equal(1, creado!.EmpresaId);
         Assert.NotEmpty(creado.ClientSecret);
 
-        var token = await service.AutenticarAsync(new AgenteLoginDto
+        var token = await authService.AutenticarAsync(new AgenteLoginDto
         {
             ClientId = creado.ClientId,
             ClientSecret = creado.ClientSecret
@@ -1016,11 +1026,17 @@ public class AgenteServiceTests
     public async Task DesactivarAgente_ImpideNuevoLogin()
     {
         await using var context = CreateContext();
-        var service = new AgenteService(
+        var adminService = new AgenteAdminService(
+            context,
+            new PasswordHasher<AgenteInstalacion>()
+            );
+        var authService = new AgenteAuthService(
             context,
             new PasswordHasher<AgenteInstalacion>(),
-            CreateTokenService());
-        var creado = await service.CrearAsync(new AgenteCrearDto
+            CreateTokenService()
+            
+        );
+        var creado = await adminService.CrearAsync(new AgenteCrearDto
         {
             SucursalId = 1,
             ClientId = "lector-central",
@@ -1028,9 +1044,9 @@ public class AgenteServiceTests
         });
 
         Assert.NotNull(creado);
-        Assert.True(await service.DesactivarAsync(creado!.Id));
+        Assert.True(await adminService.DesactivarAsync(creado!.Id));
 
-        var token = await service.AutenticarAsync(new AgenteLoginDto
+        var token = await authService.AutenticarAsync(new AgenteLoginDto
         {
             ClientId = creado.ClientId,
             ClientSecret = creado.ClientSecret

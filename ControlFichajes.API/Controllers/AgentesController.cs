@@ -9,18 +9,22 @@ namespace ControlFichajes.API.Controllers;
 [Route("api/[controller]")]
 public sealed class AgentesController : ControllerBase
 {
-    private readonly IAgenteService _agenteService;
+    private readonly IAgenteAdminService _agenteAdminService;
+    private readonly IAgenteLectorService _agenteLectorService;
 
-    public AgentesController(IAgenteService agenteService)
+    public AgentesController(IAgenteAuthService agenteAuthService,
+        IAgenteAdminService agenteAdminService,
+        IAgenteLectorService agenteLectorService)
     {
-        _agenteService = agenteService;
+        _agenteAdminService = agenteAdminService;
+        _agenteLectorService = agenteLectorService;
     }
 
     [HttpPost]
     [Authorize(Policy = "SoloSuperadmin")]
     public async Task<IActionResult> Crear(AgenteCrearDto request)
     {
-        var agente = await _agenteService.CrearAsync(request);
+        var agente = await _agenteAdminService.CrearAsync(request);
         return agente == null
             ? Conflict(new { mensaje = "El clientId ya existe o la sucursal no existe." })
             : CreatedAtAction(nameof(Obtener), new { id = agente.Id }, agente);
@@ -30,14 +34,14 @@ public sealed class AgentesController : ControllerBase
     [Authorize(Policy = "SoloSuperadmin")]
     public async Task<IActionResult> Listar()
     {
-        return Ok(await _agenteService.ListarAsync());
+        return Ok(await _agenteAdminService.ListarAsync());
     }
 
     [HttpGet("{id:int}")]
     [Authorize(Policy = "SoloSuperadmin")]
     public async Task<IActionResult> Obtener(int id)
     {
-        var agente = await _agenteService.ObtenerAsync(id);
+        var agente = await _agenteAdminService.ObtenerAsync(id);
         return agente == null ? NotFound() : Ok(agente);
     }
 
@@ -45,7 +49,7 @@ public sealed class AgentesController : ControllerBase
     [Authorize(Policy = "SoloSuperadmin")]
     public async Task<IActionResult> RotarSecret(int id)
     {
-        var agente = await _agenteService.RotarSecretAsync(id);
+        var agente = await _agenteAdminService.RotarSecretAsync(id);
         return agente == null ? NotFound() : Ok(agente);
     }
 
@@ -53,7 +57,7 @@ public sealed class AgentesController : ControllerBase
     [Authorize(Policy = "SoloSuperadmin")]
     public async Task<IActionResult> Desactivar(int id)
     {
-        return await _agenteService.DesactivarAsync(id) ? NoContent() : NotFound();
+        return await _agenteAdminService.DesactivarAsync(id) ? NoContent() : NotFound();
     }
 
     [HttpGet("sucursal")]
@@ -66,7 +70,7 @@ public sealed class AgentesController : ControllerBase
         if (!int.TryParse(User.FindFirst("sucursal_id")?.Value, out var sucursalId))
             return Forbid();
 
-        var sucursal = await _agenteService.ObtenerSucursalPorAgenteAsync(agenteId, sucursalId);
+        var sucursal = await _agenteLectorService.ObtenerSucursalPorAgenteAsync(agenteId, sucursalId);
         return sucursal == null ? NotFound() : Ok(sucursal);
     }
 
@@ -77,7 +81,7 @@ public sealed class AgentesController : ControllerBase
         if (!int.TryParse(User.FindFirst("agente_id")?.Value, out var agenteId) || agenteId != id)
             return Forbid();
 
-        var heartbeat = await _agenteService.RegistrarHeartbeatAsync(id, request);
+        var heartbeat = await _agenteLectorService.RegistrarHeartbeatAsync(id, request);
         return heartbeat == null ? NotFound() : Ok(new { agenteId = id, ultimoAcceso = DateTime.UtcNow });
     }
 }

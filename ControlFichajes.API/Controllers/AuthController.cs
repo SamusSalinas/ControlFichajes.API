@@ -11,17 +11,14 @@ namespace ControlFichajes.API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
-        private readonly IAgenteService _agenteService;
 
         private readonly IAgenteAuthService _agenteAuthService;
 
         public AuthController(
-            IAuthService authService, 
-            IAgenteService agenteService,
+            IAuthService authService,
             IAgenteAuthService agenteAuthService)
         {
             _authService = authService;
-            _agenteService = agenteService;
             _agenteAuthService = agenteAuthService;
         }
 
