@@ -1427,4 +1427,95 @@ public class EmpleadoServiceTests
         Assert.True(ok);
         Assert.Equal(1, await context.Huella.CountAsync());
     }
+
+    public class UsuarioServiceTests
+{
+    private static AppDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        var context = new AppDbContext(options);
+        context.Empresa.Add(new Empresa
+        {
+            Id = 1,
+            NombreFantasia = "Empresa Test",
+            RazonSocial = "Empresa Test S.A.",
+            CUIT = "30-12345678-9"
+        });
+        context.SaveChanges();
+        return context;
+    }
+
+    [Fact]
+    public async Task RegistrarUsuario_ConPermisosValidos_CreaYPersisteUsuario()
+    {
+        // Arrange
+        await using var context = CreateContext();
+        var adminAccess = new DefaultUsuarioAdministracionAccess();
+        var passwordHasher = new PasswordHasher<Usuario>();
+        var service = new UsuarioService(context, adminAccess, passwordHasher);
+
+        // Simulamos un SuperAdmin que siempre puede crear (OperadorId = 1)
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, "1"),
+            new(ClaimTypes.Role, AppRoles.SuperAdmin)
+        };
+        var usuarioActual = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var dto = new UsuarioRegistroDto
+        {
+            EmpresaId = 1,
+            NombreUsuario = "NuevoRRHH",
+            Email = "rrhh_nuevo@empresa.com",
+            Password = "Password123!",
+            Rol = AppRoles.Rrhh
+        };
+
+        // Act
+        var result = await service.RegistrarUsuario(usuarioActual, dto);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("NuevoRRHH", result.NombreUsuario);
+        Assert.True(result.Id > 0); // Verifica persistencia en Entity Framework
+        Assert.Equal(1, await context.Usuario.CountAsync(u => u.Correo == "rrhh_nuevo@empresa.com"));
+    }
+
+    [Fact]
+    public async Task RegistrarUsuario_SinPermisos_LanzaUnauthorizedAccessException()
+    {
+        // Arrange
+        await using var context = CreateContext();
+        var adminAccess = new DefaultUsuarioAdministracionAccess();
+        var passwordHasher = new PasswordHasher<Usuario>();
+        var service = new UsuarioService(context, adminAccess, passwordHasher);
+
+        // Simulamos un usuario RRHH (no puede crear otros RRHH ni Admins)
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, "2"),
+            new(ClaimTypes.Role, AppRoles.Rrhh),
+            new("empresa_id", "1")
+        };
+        var usuarioActual = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var dto = new UsuarioRegistroDto
+        {
+            EmpresaId = 1,
+            NombreUsuario = "OtroRRHH",
+            Email = "ilegal@empresa.com",
+            Password = "Password123!",
+            Rol = AppRoles.Rrhh
+        };
+
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => 
+            service.RegistrarUsuario(usuarioActual, dto));
+            
+        Assert.Equal("No tienes permisos suficientes para administrar este objetivo.", ex.Message);
+    }
+}
+
 }

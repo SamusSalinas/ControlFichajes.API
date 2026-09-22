@@ -50,6 +50,8 @@ builder.Services.AddScoped<IAgenteLectorService, AgenteLectorService>();
 builder.Services.AddScoped<IEmpleadoService, EmpleadoService>();
 builder.Services.AddScoped<IPasswordHasher<Usuario>, PasswordHasher<Usuario>>();
 builder.Services.AddScoped<IPasswordHasher<AgenteInstalacion>, PasswordHasher<AgenteInstalacion>>();
+builder.Services.AddScoped<IUsuarioAdministracionAccess, DefaultUsuarioAdministracionAccess>();
+builder.Services.AddScoped<UsuarioService>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
