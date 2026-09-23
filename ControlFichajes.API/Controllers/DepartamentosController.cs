@@ -1,4 +1,5 @@
 using ControlFichajes.API.Data;
+using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Security;
 using Microsoft.AspNetCore.Authorization;
@@ -27,11 +28,11 @@ namespace ControlFichajes.API.Controllers
 
             var departamentos = await _context.Departamento
                 .Where(d => d.Sucursal != null && d.Sucursal.EmpresaId == empresaId)
-                .Select(d => new
+                .Select(d => new DepartamentoDto
                 {
-                    d.Id,
-                    d.Nombre,
-                    d.SucursalId
+                    Id = d.Id,
+                    Nombre = d.Nombre,
+                    SucursalId = d.SucursalId
                 })
                 .ToListAsync();
 
@@ -39,7 +40,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<Departamento>> GetDepartamento(int id)
+        public async Task<IActionResult> GetDepartamento(int id)
         {
             var departamento = await _context.Departamento
                 .Include(d => d.Sucursal)
@@ -51,11 +52,17 @@ namespace ControlFichajes.API.Controllers
             if (departamento.Sucursal == null || !EmpresaAccess.PerteneceAUsuario(User, departamento.Sucursal.EmpresaId))
                 return Forbid();
 
-            return Ok(departamento);
+            return Ok(new DepartamentoDto
+            {
+                Id = departamento.Id,
+                Nombre = departamento.Nombre,
+                SucursalId = departamento.SucursalId
+            });
         }
 
         [HttpPost]
-        public async Task<ActionResult<Departamento>> PostDepartamento(Departamento departamento)
+        [Authorize(Roles = "SuperAdmin,ADMIN")]
+        public async Task<IActionResult> PostDepartamento(Departamento departamento)
         {
             var sucursal = await _context.Sucursal.FirstOrDefaultAsync(s => s.Id == departamento.SucursalId);
             if (sucursal == null)
@@ -64,10 +71,24 @@ namespace ControlFichajes.API.Controllers
             if (!EmpresaAccess.PerteneceAUsuario(User, sucursal.EmpresaId))
                 return Forbid();
 
+            bool existe = await _context.Departamento
+                .AnyAsync(d => d.Nombre == departamento.Nombre && d.SucursalId == departamento.SucursalId);
+            if (existe)
+            {
+                return Conflict(new { mensaje = "Ya existe un departamento con ese nombre en esa sucursal." });
+            }
+
             _context.Departamento.Add(departamento);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetDepartamento), new { id = departamento.Id }, departamento);
+            var dto = new DepartamentoDto
+            {
+                Id = departamento.Id,
+                Nombre = departamento.Nombre,
+                SucursalId = departamento.SucursalId
+            };
+
+            return CreatedAtAction(nameof(GetDepartamento), new { id = departamento.Id }, dto);
         }
 
         [HttpPut("{id}")]
