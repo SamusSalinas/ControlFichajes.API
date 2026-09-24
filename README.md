@@ -498,6 +498,11 @@ DELETE /api/departamentos/{id}
 
 - Los departamentos pertenecen a una sucursal.
 - La asociación se valida contra la empresa del usuario autenticado antes de guardar o editar.
+- Los departamentos pertenecen a una sucursal.
+- La creación `POST` y modificación `PUT` están restringidas a roles `SuperAdmin` y `ADMIN`. El rol `RRHH` solo tiene acceso de lectura.
+- La asociación con la sucursal se valida contra la empresa del usuario autenticado antes de guardar o editar (403 Forbidden si pertenece a otra empresa).
+- Los endpoints de consulta y creación devuelven DTOs planos (`id`, `nombre`, `sucursalId`) evitando ciclos de serialización.
+- POST `/api/departamentos` valida unicidad de nombre por sucursal: si ya existe un departamento con el mismo nombre en la misma sucursal, devuelve 409 Conflict. El mismo nombre en una sucursal distinta sí está permitido.
 
 ## Empleados y huellas
 
@@ -655,6 +660,8 @@ La validación actual cubre:
 - actualización de empleados activos vía PATCH
 - baja lógica (soft delete) de empleados
 - enrolamiento de huellas para empleados activos
+- creación de departamentos con DTOs planos y prevención de ciclos JSON
+- validación de departamentos duplicados por sucursal y restricción de creación/modificación para rol RRHH
 
 El documento OpenAPI se publica en desarrollo mediante `MapOpenApi`.
 
