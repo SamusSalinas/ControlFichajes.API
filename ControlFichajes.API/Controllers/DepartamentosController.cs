@@ -10,7 +10,7 @@ namespace ControlFichajes.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize (Policy = "PuedeAdministrarDepartamentos")]
+    [Authorize]
     public class DepartamentosController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -61,6 +61,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Policy = "PuedeAdministrarDepartamentos")]
         public async Task<IActionResult> PostDepartamento(DepartamentoCrearDto request)
         {
             var sucursal = await _context.Sucursal.FirstOrDefaultAsync(s => s.Id == request.SucursalId);
@@ -97,6 +98,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Policy = "PuedeAdministrarDepartamentos")]
         public async Task<IActionResult> PutDepartamento(int id, DepartamentoCrearDto request)
         {
             var departamentoDb = await _context.Departamento
@@ -117,6 +119,7 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy = "PuedeAdministrarDepartamentos")]
         public async Task<IActionResult> DeleteDepartamento(int id)
         {
             var departamento = await _context.Departamento

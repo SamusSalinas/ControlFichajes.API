@@ -497,9 +497,10 @@ DELETE /api/departamentos/{id}
 ```
 
 - Los departamentos pertenecen a una sucursal.
-- La asociación se valida contra la empresa del usuario autenticado antes de guardar o editar.
-- Los departamentos pertenecen a una sucursal.
-- La creación `POST` y modificación `PUT` están restringidas a roles `SuperAdmin` y `ADMIN`. El rol `RRHH` solo tiene acceso de lectura.
+- **Permisos por rol:** Los endpoints de consulta (`GET`) están permitidos para todos los roles autenticados (`SuperAdmin`, `ADMIN` y `RRHH`), lo que permite a RRHH listar y asignar departamentos a empleados. Las operaciones de modificación (`POST`, `PUT`, `DELETE`) requieren la política `PuedeAdministrarDepartamentos` (`SuperAdmin` y `ADMIN`); el rol `RRHH` recibe `403 Forbidden` si intenta crear, editar o eliminar.
+- La asociación con la sucursal se valida contra la empresa del usuario autenticado (devuelve `403 Forbidden` si pertenece a otra empresa).
+- Todos los endpoints utilizan DTOs planos (`DepartamentoDto` y `DepartamentoCrearDto`), eliminando referencias circulares en la serialización JSON.
+- `POST` y `PUT` validan la unicidad del nombre dentro de la misma sucursal (`Nombre` + `SucursalId`). Si el nombre ya existe en la sucursal, responde `409 Conflict`. El mismo nombre en sucursales distintas está permitido.
 - La asociación con la sucursal se valida contra la empresa del usuario autenticado antes de guardar o editar (403 Forbidden si pertenece a otra empresa).
 - Los endpoints de consulta y creación devuelven DTOs planos (`id`, `nombre`, `sucursalId`) evitando ciclos de serialización.
 - POST `/api/departamentos` valida unicidad de nombre por sucursal: si ya existe un departamento con el mismo nombre en la misma sucursal, devuelve 409 Conflict. El mismo nombre en una sucursal distinta sí está permitido.
