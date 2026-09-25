@@ -61,10 +61,10 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPost]
-        [Authorize(Roles = "SuperAdmin,ADMIN")]
-        public async Task<IActionResult> PostDepartamento(Departamento departamento)
+        [Authorize(Policy = "PuedeAdministrarDepartamentos")]
+        public async Task<IActionResult> PostDepartamento(DepartamentoCrearDto request)
         {
-            var sucursal = await _context.Sucursal.FirstOrDefaultAsync(s => s.Id == departamento.SucursalId);
+            var sucursal = await _context.Sucursal.FirstOrDefaultAsync(s => s.Id == request.SucursalId);
             if (sucursal == null)
                 return BadRequest(new { mensaje = "La sucursal no existe." });
 
@@ -72,11 +72,17 @@ namespace ControlFichajes.API.Controllers
                 return Forbid();
 
             bool existe = await _context.Departamento
-                .AnyAsync(d => d.Nombre == departamento.Nombre && d.SucursalId == departamento.SucursalId);
+                .AnyAsync(d => d.Nombre == request.Nombre && d.SucursalId == request.SucursalId);
             if (existe)
             {
                 return Conflict(new { mensaje = "Ya existe un departamento con ese nombre en esa sucursal." });
             }
+
+            var departamento = new Departamento
+            {
+                Nombre = request.Nombre,
+                SucursalId = request.SucursalId
+            };
 
             _context.Departamento.Add(departamento);
             await _context.SaveChangesAsync();
@@ -92,11 +98,9 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutDepartamento(int id, Departamento departamento)
+        [Authorize(Policy = "PuedeAdministrarDepartamentos")]
+        public async Task<IActionResult> PutDepartamento(int id, DepartamentoCrearDto request)
         {
-            if (id != departamento.Id)
-                return BadRequest();
-
             var departamentoDb = await _context.Departamento
                 .Include(d => d.Sucursal)
                 .FirstOrDefaultAsync(d => d.Id == id);
@@ -107,14 +111,15 @@ namespace ControlFichajes.API.Controllers
             if (departamentoDb.Sucursal == null || !EmpresaAccess.PerteneceAUsuario(User, departamentoDb.Sucursal.EmpresaId))
                 return Forbid();
 
-            departamentoDb.Nombre = departamento.Nombre;
-            departamentoDb.SucursalId = departamento.SucursalId;
+            departamentoDb.Nombre = request.Nombre;
+            departamentoDb.SucursalId = request.SucursalId;
 
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy = "PuedeAdministrarDepartamentos")]
         public async Task<IActionResult> DeleteDepartamento(int id)
         {
             var departamento = await _context.Departamento

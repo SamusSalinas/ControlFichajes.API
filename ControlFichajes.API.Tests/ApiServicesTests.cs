@@ -786,6 +786,114 @@ public class SucursalesControllerTests
         Assert.True(await context.Sucursal.AnyAsync(s => s.EmpresaId == 2 && s.Nombre == "Sur"));
     }
 
+    [Fact]
+    public async Task PutSucursal_AdminDevuelveForbidden()
+    {
+        await using var context = CreateContext();
+        var user = CrearUsuario(AppRoles.Admin, empresaId: 1);
+        var controller = CrearController(context, user);
+
+        var updatedSucursal = new Sucursal
+        {
+            Id = 1,
+            EmpresaId = 1,
+            Nombre = "Central Modificada",
+            SerialLector = "SERIAL-1-MOD"
+        };
+
+        var result = await controller.PutSucursal(1, updatedSucursal);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task PutSucursal_SuperAdminConContextoActualizaSucursal()
+    {
+        await using var context = CreateContext();
+        var user = CrearUsuario(AppRoles.SuperAdmin);
+        EmpresaAccess.ApplyEmpresaContext(user, new HeaderDictionary { ["X-Empresa-Id"] = "1" });
+        var controller = CrearController(context, user);
+
+        var updatedSucursal = new Sucursal
+        {
+            Id = 1,
+            EmpresaId = 1,
+            Nombre = "Central Actualizada por SuperAdmin",
+            SerialLector = "SERIAL-1-SA"
+        };
+
+        var result = await controller.PutSucursal(1, updatedSucursal);
+
+        Assert.IsType<NoContentResult>(result);
+        var dbSucursal = await context.Sucursal.FindAsync(1);
+        Assert.NotNull(dbSucursal);
+        Assert.Equal("Central Actualizada por SuperAdmin", dbSucursal.Nombre);
+    }
+
+    [Fact]
+    public async Task PutSucursal_IdMismatch_ReturnsBadRequest()
+    {
+        await using var context = CreateContext();
+        var user = CrearUsuario(AppRoles.SuperAdmin);
+        EmpresaAccess.ApplyEmpresaContext(user, new HeaderDictionary { ["X-Empresa-Id"] = "1" });
+        var controller = CrearController(context, user);
+
+        var updatedSucursal = new Sucursal
+        {
+            Id = 1,
+            EmpresaId = 1,
+            Nombre = "Nombre",
+            SerialLector = "SERIAL-1"
+        };
+
+        var result = await controller.PutSucursal(99, updatedSucursal);
+
+        Assert.IsType<BadRequestResult>(result);
+    }
+
+    [Fact]
+    public async Task PutSucursal_NotFound_ReturnsNotFound()
+    {
+        await using var context = CreateContext();
+        var user = CrearUsuario(AppRoles.SuperAdmin);
+        EmpresaAccess.ApplyEmpresaContext(user, new HeaderDictionary { ["X-Empresa-Id"] = "1" });
+        var controller = CrearController(context, user);
+
+        var updatedSucursal = new Sucursal
+        {
+            Id = 99,
+            EmpresaId = 1,
+            Nombre = "Inexistente",
+            SerialLector = "SERIAL-99"
+        };
+
+        var result = await controller.PutSucursal(99, updatedSucursal);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task PutSucursal_DifferentEmpresa_ReturnsForbid()
+    {
+        await using var context = CreateContext();
+        // Sucursal 1 belongs to Empresa 1. SuperAdmin context set to Empresa 2.
+        var user = CrearUsuario(AppRoles.SuperAdmin);
+        EmpresaAccess.ApplyEmpresaContext(user, new HeaderDictionary { ["X-Empresa-Id"] = "2" });
+        var controller = CrearController(context, user);
+
+        var updatedSucursal = new Sucursal
+        {
+            Id = 1,
+            EmpresaId = 1,
+            Nombre = "Intento Modificacion",
+            SerialLector = "SERIAL-1"
+        };
+
+        var result = await controller.PutSucursal(1, updatedSucursal);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
     private static SucursalesController CrearController(AppDbContext context, ClaimsPrincipal user)
     {
         return new SucursalesController(context)

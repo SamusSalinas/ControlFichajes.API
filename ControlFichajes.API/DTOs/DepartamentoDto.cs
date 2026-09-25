@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ControlFichajes.API.DTOs
 {
     public class DepartamentoDto
@@ -6,4 +8,14 @@ namespace ControlFichajes.API.DTOs
         public string Nombre { get; set; } = string.Empty;
         public int SucursalId { get; set; }
     }
+    public class DepartamentoCrearDto
+    {
+        [Required, MaxLength(100)]
+        public string Nombre { get; set; } = string.Empty;
+
+        [Required]
+        public int SucursalId { get; set; }
+    }
+
+
 }
