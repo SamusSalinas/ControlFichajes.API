@@ -25,5 +25,9 @@ namespace ControlFichajes.API.Models
         public string Metodo { get; set; } = "Biometrico";
 
         public virtual FichadaObservacion? Observacion { get; set; }
+        public bool EsManual { get; set; } = false;
+    
+        [MaxLength(20)]
+        public string Estado { get; set; } = "Completada";
     }
 }

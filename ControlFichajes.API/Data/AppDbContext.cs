@@ -16,6 +16,9 @@ namespace ControlFichajes.API.Data
         public DbSet<Sucursal> Sucursal { get; set; }
         public DbSet<Departamento> Departamento { get; set; }
         public DbSet<AgenteInstalacion> AgenteInstalacion { get; set; }
+        public DbSet<Turno> Turno { get; set; } = null!;
+        public DbSet<TurnoDia> TurnoDia { get; set; } = null!;
+        public DbSet<EmpleadoTurno> EmpleadoTurno { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
