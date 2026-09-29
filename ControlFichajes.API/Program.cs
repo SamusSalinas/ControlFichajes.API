@@ -90,6 +90,9 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("PuedeEscribirObservacionFichada", policy => policy
         .RequireClaim("token_use", "web")
         .RequireRole("SuperAdmin", "ADMIN", "RRHH"));
+    options.AddPolicy("PuedeAdministrarDepartamentos", policy => policy
+        .RequireClaim("token_use", "web")
+        .RequireRole("SuperAdmin", "ADMIN"));
 });
 
 var app = builder.Build();

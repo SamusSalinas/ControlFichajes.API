@@ -76,8 +76,12 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Policy = "SoloSuperadmin")]
         public async Task<IActionResult> PutSucursal(int id, Sucursal sucursal)
         {
+            if (!EmpresaAccess.IsSuperAdmin(User))
+                return Forbid();
+
             if (id != sucursal.Id)
                 return BadRequest();
 
@@ -100,8 +104,12 @@ namespace ControlFichajes.API.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy = "SoloSuperadmin")]
         public async Task<IActionResult> DeleteSucursal(int id)
         {
+            if (!EmpresaAccess.IsSuperAdmin(User))
+                return Forbid();
+
             var sucursal = await _context.Sucursal.FirstOrDefaultAsync(s => s.Id == id);
             if (sucursal == null)
                 return NotFound();
