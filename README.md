@@ -505,6 +505,22 @@ DELETE /api/departamentos/{id}
 - Los endpoints de consulta y creación devuelven DTOs planos (`id`, `nombre`, `sucursalId`) evitando ciclos de serialización.
 - POST `/api/departamentos` valida unicidad de nombre por sucursal: si ya existe un departamento con el mismo nombre en la misma sucursal, devuelve 409 Conflict. El mismo nombre en una sucursal distinta sí está permitido.
 
+### Turnos
+
+```text
+GET    /api/turnos
+GET    /api/turnos/{id}
+POST   /api/turnos
+PUT    /api/turnos/{id}
+DELETE /api/turnos/{id}
+```
+
+- Permite definir y gestionar los horarios de trabajo asignables a los empleados.
+- Todos los endpoints operan exclusivamente con DTOs planos (`TurnoDto`, `TurnoCrearDto`, `TurnoDiaDto`), evitando dependencias directas con los modelos de datos en el contrato público.
+- Las consultas `GET` permiten visualizar la configuración de turnos y sus horarios diarios por día de la semana (`DiaSemana`, `HoraEntrada`, `HoraSalida`).
+- Las operaciones de creación, edición y eliminación (`POST`, `PUT`, `DELETE`) están restringidas a los roles `SuperAdmin` y `ADMIN`.
+- Todas las operaciones están estrictamente aisladas por el contexto de empresa del usuario autenticado (`empresa_id`).
+
 ## Empleados y huellas
 
 ```text
@@ -578,6 +594,14 @@ El endpoint `GET` devuelve:
 - `fechaHora`
 - `tipo`
 - `metodo`
+
+### Procesamiento automático (CorteMedianocheWorker)
+
+El sistema incluye un servicio en segundo plano (`CorteMedianocheWorker` registrado mediante `AddHostedService`) que se ejecuta a la medianoche:
+
+- Detecta automáticamente las fichadas de entrada del día anterior que no registraron su correspondiente marca de salida.
+- Actualiza el estado de la fichada a `Incompleto`.
+- Calcula las horas trabajadas desde la hora de entrada hasta las 23:59:59 del mismo día.
 
 ## Desarrollo local
 
@@ -663,6 +687,8 @@ La validación actual cubre:
 - enrolamiento de huellas para empleados activos
 - creación de departamentos con DTOs planos y prevención de ciclos JSON
 - validación de departamentos duplicados por sucursal y restricción de creación/modificación para rol RRHH
+- corte de medianoche de fichadas abiertas (marcado `Incompleto` y cálculo de horas) vía `CorteMedianocheWorker`
+- operaciones CRUD de turnos y sus horarios diarios aisladas por tenant de empresa y con mocks de `Moq` y `xUnit` (`TurnosControllerTests` y `TurnoServiceTests`)
 
 El documento OpenAPI se publica en desarrollo mediante `MapOpenApi`.
 

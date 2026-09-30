@@ -52,6 +52,8 @@ builder.Services.AddScoped<IPasswordHasher<Usuario>, PasswordHasher<Usuario>>();
 builder.Services.AddScoped<IPasswordHasher<AgenteInstalacion>, PasswordHasher<AgenteInstalacion>>();
 builder.Services.AddScoped<IUsuarioAdministracionAccess, DefaultUsuarioAdministracionAccess>();
 builder.Services.AddScoped<UsuarioService>();
+builder.Services.AddScoped<ITurnoService, TurnoService>();
+builder.Services.AddHostedService<CorteMedianocheWorker>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
