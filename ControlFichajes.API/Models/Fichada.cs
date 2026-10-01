@@ -29,5 +29,7 @@ namespace ControlFichajes.API.Models
     
         [MaxLength(20)]
         public string Estado { get; set; } = "Completada";
+
+        public int? MinutosHastaCorte { get; set; }
     }
 }

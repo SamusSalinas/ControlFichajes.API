@@ -49,14 +49,20 @@ public class TurnosController : ControllerBase
         if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || empresaId <= 0)
             return Forbid();
 
-        if (string.IsNullOrWhiteSpace(request.Nombre))
+        if (request == null || string.IsNullOrWhiteSpace(request.Nombre))
             return BadRequest(new { mensaje = "El nombre del turno es obligatorio." });
-
         if (request.Dias == null || request.Dias.Count == 0)
             return BadRequest(new { mensaje = "El turno debe contener al menos un día asignado." });
 
-        var nuevoTurno = await _turnoService.CrearAsync(empresaId, request);
-        return CreatedAtAction(nameof(GetTurno), new { id = nuevoTurno.Id }, nuevoTurno);
+        try
+        {
+            var nuevoTurno = await _turnoService.CrearAsync(empresaId, request);
+            return CreatedAtAction(nameof(GetTurno), new { id = nuevoTurno.Id }, nuevoTurno);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { mensaje = ex.Message });
+        }
     }
 
     [HttpPut("{id:int}")]
@@ -66,14 +72,18 @@ public class TurnosController : ControllerBase
         if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || empresaId <= 0)
             return Forbid();
 
-        if (string.IsNullOrWhiteSpace(request.Nombre))
-            return BadRequest(new { mensaje = "El nombre del turno es obligatorio." });
+        try
+        {
+            var actualizado = await _turnoService.ActualizarAsync(id, empresaId, request);
+            if (!actualizado)
+                return NotFound();
 
-        var actualizado = await _turnoService.ActualizarAsync(id, empresaId, request);
-        if (!actualizado)
-            return NotFound();
-
-        return NoContent();
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { mensaje = ex.Message });
+        }
     }
 
     [HttpDelete("{id:int}")]

@@ -24,6 +24,8 @@ public class CorteMedianocheWorker : BackgroundService
         {
             try
             {
+                await ProcesarFichadasAbiertasAsync(DateTime.Today.AddDays(-1), stoppingToken);
+
                 var ahora = DateTime.Now;
                 var proximaMedianoche = ahora.Date.AddDays(1);
                 var tiempoHastaMedianoche = proximaMedianoche - ahora;
@@ -70,16 +72,13 @@ public class CorteMedianocheWorker : BackgroundService
         foreach (var fichada in fichadasAbiertas)
         {
             fichada.Estado = "Incompleto";
-
-            // Calcular horas desde fichada.FechaHora hasta las 23:59:59 del mismo día
-            var finDelDia = inicioDia.Add(new TimeSpan(23, 59, 59));
-            var horasCalculadas = Math.Max(0, (finDelDia - fichada.FechaHora).TotalHours);
+            fichada.MinutosHastaCorte = Math.Max(0, (int)(finDia - fichada.FechaHora).TotalMinutes);
 
             _logger.LogInformation(
-                "Fichada {FichadaId} del empleado {EmpleadoId} marcada como Incompleto. Horas calculadas hasta medianoche: {Horas:F2}",
+                "Fichada {FichadaId} del empleado {EmpleadoId} marcada como Incompleto. Minutos hasta medianoche: {Minutos}",
                 fichada.Id,
                 fichada.EmpleadoId,
-                horasCalculadas);
+                fichada.MinutosHastaCorte);
         }
 
         await context.SaveChangesAsync(cancellationToken);

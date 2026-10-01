@@ -47,6 +47,7 @@ public class TurnoServiceTests
         Assert.True(entidadDb.Activo);
         Assert.Equal(1, entidadDb.EmpresaId);
         Assert.Equal(2, entidadDb.Dias.Count);
+        Assert.Equal(60, entidadDb.Dias.Single(d => d.DiaSemana == 1).MinutosAlmuerzo);
     }
 
     [Fact]

@@ -15,7 +15,7 @@ public class FichadaManualCrearDto
     public string Tipo { get; set; } = string.Empty; // "Entrada" o "Salida"
 
     [Required(ErrorMessage = "El motivo es obligatorio.")]
-    [MaxLength(100)]
+    [MaxLength(40)]
     public string Motivo { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "El detalle es obligatorio.")]

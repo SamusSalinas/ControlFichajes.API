@@ -20,6 +20,6 @@ public class EmpleadoTurno
 
     public DateTime? FechaFin { get; set; }
 
-    // Propiedad de navegación para relacionarlo con el Turno en Entity Framework
+    public Empleado? Empleado { get; set; }
     public Turno? Turno { get; set; }
 }

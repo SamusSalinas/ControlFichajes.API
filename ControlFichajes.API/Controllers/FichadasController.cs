@@ -65,6 +65,9 @@ public class FichadasController : ControllerBase
                 f.FechaHora,
                 Tipo = f.TipoRegistro,
                 f.Metodo,
+                f.EsManual,
+                f.Estado,
+                f.MinutosHastaCorte,
                 observacion = f.Observacion == null
                     ? null
                     : new FichadaObservacionDto
@@ -81,6 +84,47 @@ public class FichadasController : ControllerBase
             .ToListAsync();
 
         return Ok(fichadas);
+    }
+
+    [HttpGet("alertas/incompletas")]
+    [Authorize(Roles = "ADMIN,SuperAdmin")]
+    public async Task<IActionResult> GetAlertasIncompletas(
+        [FromQuery] DateTime? desde,
+        [FromQuery] DateTime? hasta,
+        [FromQuery] int limite = 100)
+    {
+        if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId))
+            return Forbid();
+        if (limite is < 1 or > 500)
+            return BadRequest(new { mensaje = "El límite debe estar entre 1 y 500." });
+
+        var inicio = (desde ?? DateTime.Today.AddDays(-7)).Date;
+        var fin = (hasta ?? DateTime.Today).Date.AddDays(1);
+        if (fin <= inicio)
+            return BadRequest(new { mensaje = "El rango de fechas no es válido." });
+
+        var alertas = await _context.Fichada
+            .AsNoTracking()
+            .Where(f => f.Estado == "Incompleto" &&
+                        f.TipoRegistro == RegistroTipos.Entrada &&
+                        f.FechaHora >= inicio && f.FechaHora < fin &&
+                        f.Empleado != null && f.Empleado.EmpresaId == empresaId)
+            .OrderByDescending(f => f.FechaHora)
+            .Take(limite)
+            .Select(f => new
+            {
+                fichadaId = f.Id,
+                f.EmpleadoId,
+                nombre = f.Empleado!.Nombre,
+                apellido = f.Empleado.Apellido,
+                f.FechaHora,
+                f.MinutosHastaCorte,
+                f.EsManual,
+                mensaje = "Falta una salida antes del cierre del día."
+            })
+            .ToListAsync();
+
+        return Ok(alertas);
     }
 
     [HttpPatch("{id:int}/observacion")]

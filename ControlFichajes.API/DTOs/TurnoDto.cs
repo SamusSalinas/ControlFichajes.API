@@ -16,6 +16,7 @@ public class TurnoDiaDto
     public int DiaSemana { get; set; }
     public string HoraEntrada { get; set; } = string.Empty; // Formato "HH:mm"
     public string HoraSalida { get; set; } = string.Empty;
+    public int MinutosAlmuerzo { get; set; } = 60;
 }
 
 // DTO para creación (POST/PUT)

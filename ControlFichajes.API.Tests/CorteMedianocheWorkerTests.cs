@@ -51,6 +51,38 @@ public class CorteMedianocheWorkerTests
         var fichadaActualizada = await context.Fichada.AsNoTracking().FirstOrDefaultAsync(f => f.Id == 1);
         Assert.NotNull(fichadaActualizada);
         Assert.Equal("Incompleto", fichadaActualizada.Estado);
+        Assert.Equal(900, fichadaActualizada.MinutosHastaCorte);
+    }
+
+    [Fact]
+    public async Task ProcesarFichadasAbiertasAsync_NoUsaSalidaDelDiaSiguiente()
+    {
+        var (scopeFactory, context) = CrearAmbientePrueba();
+        var worker = new CorteMedianocheWorker(scopeFactory, NullLogger<CorteMedianocheWorker>.Instance);
+        var ayer = DateTime.Today.AddDays(-1);
+        context.Fichada.AddRange(
+            new Fichada
+            {
+                Id = 1,
+                EmpleadoId = 10,
+                FechaHora = ayer.Date.AddHours(23),
+                TipoRegistro = RegistroTipos.Entrada
+            },
+            new Fichada
+            {
+                Id = 2,
+                EmpleadoId = 10,
+                FechaHora = DateTime.Today.AddHours(1),
+                TipoRegistro = RegistroTipos.Salida
+            });
+        await context.SaveChangesAsync();
+
+        var procesadas = await worker.ProcesarFichadasAbiertasAsync(ayer);
+
+        Assert.Equal(1, procesadas);
+        var entrada = await context.Fichada.AsNoTracking().FirstAsync(f => f.Id == 1);
+        Assert.Equal("Incompleto", entrada.Estado);
+        Assert.Equal(60, entrada.MinutosHastaCorte);
     }
 
     [Fact]
