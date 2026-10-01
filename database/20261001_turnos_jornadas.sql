@@ -62,7 +62,8 @@ DEALLOCATE PREPARE stmt;
 
 UPDATE `TurnoDia`
 SET `MinutosAlmuerzo` = 60
-WHERE `MinutosAlmuerzo` <> 60;
+WHERE `Id` > 0
+    AND `MinutosAlmuerzo` <> 60;
 
 -- Los datos previos guardaban solo Empleado.TurnoId, sin fecha histórica.
 -- Migrar únicamente las asignaciones actuales que aún no tengan una fila
