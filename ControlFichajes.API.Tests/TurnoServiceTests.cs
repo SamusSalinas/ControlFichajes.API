@@ -1,8 +1,10 @@
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
+using ControlFichajes.API.Security;
 using ControlFichajes.API.Services;
 using Microsoft.EntityFrameworkCore;
+using Moq;
 using Xunit;
 
 namespace ControlFichajes.API.Tests;
@@ -14,7 +16,6 @@ public class TurnoServiceTests
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
-
         return new AppDbContext(options);
     }
 
@@ -22,8 +23,9 @@ public class TurnoServiceTests
     public async Task CrearAsync_CreaTurnoConDiasYRetornaDto()
     {
         using var context = CreateContext();
-        var service = new TurnoService(context);
+        var mockValidator = new Mock<ITurnoValidacionRules>(); // Dependencia inyectada
 
+        var service = new TurnoService(context, mockValidator.Object);
         var dto = new TurnoCrearDto
         {
             Nombre = "Turno Rotativo",
@@ -37,12 +39,13 @@ public class TurnoServiceTests
 
         var resultado = await service.CrearAsync(1, dto);
 
-        Assert.NotNull(resultado);
-        Assert.True(resultado.Id > 0);
-        Assert.Equal("Turno Rotativo", resultado.Nombre);
-        Assert.Equal(2, resultado.Dias.Count);
+        // Se usa la tupla para evaluar el resultado
+        Assert.NotNull(resultado.Turno);
+        Assert.True(resultado.Turno!.Id > 0);
+        Assert.Equal("Turno Rotativo", resultado.Turno.Nombre);
+        Assert.Equal(2, resultado.Turno.Dias.Count);
 
-        var entidadDb = await context.Turno.Include(t => t.Dias).FirstOrDefaultAsync(t => t.Id == resultado.Id);
+        var entidadDb = await context.Turno.Include(t => t.Dias).FirstOrDefaultAsync(t => t.Id == resultado.Turno.Id);
         Assert.NotNull(entidadDb);
         Assert.True(entidadDb.Activo);
         Assert.Equal(1, entidadDb.EmpresaId);
@@ -61,9 +64,10 @@ public class TurnoServiceTests
         );
         await context.SaveChangesAsync();
 
-        var service = new TurnoService(context);
-        var turnos = (await service.ObtenerPorEmpresaAsync(1)).ToList();
+        var mockValidator = new Mock<ITurnoValidacionRules>();
+        var service = new TurnoService(context, mockValidator.Object);
 
+        var turnos = (await service.ObtenerPorEmpresaAsync(1)).ToList();
         Assert.Single(turnos);
         Assert.Equal(1, turnos[0].Id);
     }
@@ -87,7 +91,9 @@ public class TurnoServiceTests
         context.Turno.Add(turno);
         await context.SaveChangesAsync();
 
-        var service = new TurnoService(context);
+        var mockValidator = new Mock<ITurnoValidacionRules>();
+        var service = new TurnoService(context, mockValidator.Object);
+
         var updateDto = new TurnoCrearDto
         {
             Nombre = "Actualizado",
@@ -99,9 +105,11 @@ public class TurnoServiceTests
             }
         };
 
-        var ok = await service.ActualizarAsync(1, 1, updateDto);
+        var resultado = await service.ActualizarAsync(1, 1, updateDto);
 
-        Assert.True(ok);
+        // Se verifica la propiedad 'Exito' de la tupla
+        Assert.True(resultado.Exito);
+
         var turnoDb = await context.Turno.Include(t => t.Dias).FirstOrDefaultAsync(t => t.Id == 1);
         Assert.NotNull(turnoDb);
         Assert.Equal("Actualizado", turnoDb.Nombre);
@@ -117,12 +125,71 @@ public class TurnoServiceTests
         context.Turno.Add(turno);
         await context.SaveChangesAsync();
 
-        var service = new TurnoService(context);
-        var ok = await service.EliminarAsync(1, 1);
+        var mockValidator = new Mock<ITurnoValidacionRules>();
+        var service = new TurnoService(context, mockValidator.Object);
 
-        Assert.True(ok);
+        var resultado = await service.EliminarAsync(1, 1);
+
+        // Se verifica la propiedad 'Exito' de la tupla
+        Assert.True(resultado.Exito);
+
         var turnoDb = await context.Turno.FindAsync(1);
         Assert.NotNull(turnoDb);
         Assert.False(turnoDb.Activo);
+    }
+
+    [Fact]
+    public async Task CrearAsync_ConErrorDeValidacion_NoPersisteTurno()
+    {
+        using var context = CreateContext();
+        var mockValidator = new Mock<ITurnoValidacionRules>();
+        mockValidator
+            .Setup(validator => validator.Validar(It.IsAny<TurnoCrearDto>()))
+            .Returns("Datos inválidos.");
+        var service = new TurnoService(context, mockValidator.Object);
+
+        var resultado = await service.CrearAsync(1, new TurnoCrearDto());
+
+        Assert.Null(resultado.Turno);
+        Assert.Equal("Datos inválidos.", resultado.Error);
+        Assert.Empty(context.Turno);
+    }
+
+    [Fact]
+    public async Task ActualizarAsync_ParaOtraEmpresa_RetornaNoEncontrado()
+    {
+        using var context = CreateContext();
+        context.Turno.Add(new Turno { Id = 1, EmpresaId = 2, Nombre = "Privado", Activo = true });
+        await context.SaveChangesAsync();
+        var service = new TurnoService(context, new Mock<ITurnoValidacionRules>().Object);
+        var dto = new TurnoCrearDto
+        {
+            Nombre = "Actualizado",
+            Dias = new List<TurnoDiaDto>
+            {
+                new() { DiaSemana = 1, HoraEntrada = "08:00", HoraSalida = "16:00" }
+            }
+        };
+
+        var resultado = await service.ActualizarAsync(1, 1, dto);
+
+        Assert.False(resultado.Exito);
+        Assert.Equal("Turno no encontrado.", resultado.Error);
+        Assert.Equal("Privado", (await context.Turno.FindAsync(1))!.Nombre);
+    }
+
+    [Fact]
+    public async Task EliminarAsync_TurnoDeOtraEmpresa_RetornaNoEncontrado()
+    {
+        using var context = CreateContext();
+        context.Turno.Add(new Turno { Id = 1, EmpresaId = 2, Nombre = "Privado", Activo = true });
+        await context.SaveChangesAsync();
+        var service = new TurnoService(context, new Mock<ITurnoValidacionRules>().Object);
+
+        var resultado = await service.EliminarAsync(1, 1);
+
+        Assert.False(resultado.Exito);
+        Assert.Equal("Turno no encontrado.", resultado.Error);
+        Assert.True((await context.Turno.FindAsync(1))!.Activo);
     }
 }

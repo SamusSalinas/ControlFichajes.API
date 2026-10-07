@@ -49,20 +49,13 @@ public class TurnosController : ControllerBase
         if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || empresaId <= 0)
             return Forbid();
 
-        if (request == null || string.IsNullOrWhiteSpace(request.Nombre))
-            return BadRequest(new { mensaje = "El nombre del turno es obligatorio." });
-        if (request.Dias == null || request.Dias.Count == 0)
-            return BadRequest(new { mensaje = "El turno debe contener al menos un día asignado." });
+        var resultado = await _turnoService.CrearAsync(empresaId, request);
+        if (resultado.Error is not null)
+            return BadRequest(new { mensaje = resultado.Error });
 
-        try
-        {
-            var nuevoTurno = await _turnoService.CrearAsync(empresaId, request);
-            return CreatedAtAction(nameof(GetTurno), new { id = nuevoTurno.Id }, nuevoTurno);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { mensaje = ex.Message });
-        }
+        var nuevoTurno = resultado.Turno
+            ?? throw new InvalidOperationException("La creación del turno no devolvió datos ni un error.");
+        return CreatedAtAction(nameof(GetTurno), new { id = nuevoTurno.Id }, nuevoTurno);
     }
 
     [HttpPut("{id:int}")]
@@ -72,18 +65,16 @@ public class TurnosController : ControllerBase
         if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || empresaId <= 0)
             return Forbid();
 
-        try
+        var resultado = await _turnoService.ActualizarAsync(id, empresaId, request);
+        if (!resultado.Exito)
         {
-            var actualizado = await _turnoService.ActualizarAsync(id, empresaId, request);
-            if (!actualizado)
-                return NotFound();
+            if (resultado.Error?.Contains("encontrado", StringComparison.OrdinalIgnoreCase) == true)
+            return NotFound();
 
-            return NoContent();
+            return BadRequest(new { mensaje = resultado.Error });
         }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { mensaje = ex.Message });
-        }
+
+        return NoContent();
     }
 
     [HttpDelete("{id:int}")]
@@ -93,8 +84,8 @@ public class TurnosController : ControllerBase
         if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || empresaId <= 0)
             return Forbid();
 
-        var eliminado = await _turnoService.EliminarAsync(id, empresaId);
-        if (!eliminado)
+        var resultado = await _turnoService.EliminarAsync(id, empresaId);
+        if (!resultado.Exito)
             return NotFound();
 
         return NoContent();

@@ -28,10 +28,8 @@ public class TurnosControllerTests
         {
             claims.Add(new Claim(ClaimTypes.Role, role));
         }
-
         var identity = new ClaimsIdentity(claims, "TestAuth");
         var user = new ClaimsPrincipal(identity);
-
         var controller = new TurnosController(mockService.Object)
         {
             ControllerContext = new ControllerContext
@@ -39,14 +37,12 @@ public class TurnosControllerTests
                 HttpContext = new DefaultHttpContext { User = user }
             }
         };
-
         return controller;
     }
 
     // ==========================================
     // CAMINOS DE SEGURIDAD (ATRIBUTOS DE ROL)
     // ==========================================
-
     [Theory]
     [InlineData(nameof(TurnosController.PostTurno))]
     [InlineData(nameof(TurnosController.PutTurno))]
@@ -56,7 +52,6 @@ public class TurnosControllerTests
         var method = typeof(TurnosController)
             .GetMethods()
             .FirstOrDefault(m => m.Name == methodName);
-
         Assert.NotNull(method);
         var authAttr = method.GetCustomAttribute<AuthorizeAttribute>();
         Assert.NotNull(authAttr);
@@ -69,9 +64,7 @@ public class TurnosControllerTests
     {
         var mockService = new Mock<ITurnoService>();
         var controller = CreateController(mockService, empresaId: null);
-
         var result = await controller.GetTurnos();
-
         Assert.IsType<ForbidResult>(result.Result);
     }
 
@@ -80,9 +73,7 @@ public class TurnosControllerTests
     {
         var mockService = new Mock<ITurnoService>();
         var controller = CreateController(mockService, empresaId: 0);
-
         var result = await controller.GetTurnos();
-
         Assert.IsType<ForbidResult>(result.Result);
     }
 
@@ -91,9 +82,7 @@ public class TurnosControllerTests
     {
         var mockService = new Mock<ITurnoService>();
         var controller = CreateController(mockService, empresaId: null);
-
         var result = await controller.GetTurno(1);
-
         Assert.IsType<ForbidResult>(result.Result);
     }
 
@@ -102,9 +91,7 @@ public class TurnosControllerTests
     {
         var mockService = new Mock<ITurnoService>();
         var controller = CreateController(mockService, empresaId: null);
-
         var result = await controller.PostTurno(new TurnoCrearDto { Nombre = "Mañana" });
-
         Assert.IsType<ForbidResult>(result.Result);
     }
 
@@ -113,9 +100,7 @@ public class TurnosControllerTests
     {
         var mockService = new Mock<ITurnoService>();
         var controller = CreateController(mockService, empresaId: null);
-
         var result = await controller.PutTurno(1, new TurnoCrearDto { Nombre = "Mañana" });
-
         Assert.IsType<ForbidResult>(result);
     }
 
@@ -124,16 +109,13 @@ public class TurnosControllerTests
     {
         var mockService = new Mock<ITurnoService>();
         var controller = CreateController(mockService, empresaId: null);
-
         var result = await controller.DeleteTurno(1);
-
         Assert.IsType<ForbidResult>(result);
     }
 
     // ==========================================
     // CAMINOS DE ÉXITO
     // ==========================================
-
     [Fact]
     public async Task GetTurnos_RetornaOkConListaDeTurnoDtos()
     {
@@ -145,11 +127,8 @@ public class TurnosControllerTests
         };
         mockService.Setup(s => s.ObtenerPorEmpresaAsync(1))
             .ReturnsAsync(turnosDto);
-
         var controller = CreateController(mockService, empresaId: 1);
-
         var result = await controller.GetTurnos();
-
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         var data = Assert.IsAssignableFrom<IEnumerable<TurnoDto>>(okResult.Value);
         Assert.Equal(2, data.Count());
@@ -162,11 +141,8 @@ public class TurnosControllerTests
         var turnoDto = new TurnoDto { Id = 5, Nombre = "Turno Noche", ToleranciaMinutos = 5 };
         mockService.Setup(s => s.ObtenerPorIdAsync(5, 1))
             .ReturnsAsync(turnoDto);
-
         var controller = CreateController(mockService, empresaId: 1);
-
         var result = await controller.GetTurno(5);
-
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         var data = Assert.IsType<TurnoDto>(okResult.Value);
         Assert.Equal(5, data.Id);
@@ -186,7 +162,6 @@ public class TurnosControllerTests
                 new() { DiaSemana = 1, HoraEntrada = "08:00", HoraSalida = "17:00" }
             }
         };
-
         var creadoDto = new TurnoDto
         {
             Id = 10,
@@ -195,13 +170,12 @@ public class TurnosControllerTests
             Dias = request.Dias
         };
 
+        // Devuelve una Tupla para satisfacer la firma actual
         mockService.Setup(s => s.CrearAsync(1, request))
-            .ReturnsAsync(creadoDto);
+            .ReturnsAsync((creadoDto, (string?)null));
 
         var controller = CreateController(mockService, empresaId: 1);
-
         var result = await controller.PostTurno(request);
-
         var createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
         Assert.Equal(nameof(TurnosController.GetTurno), createdResult.ActionName);
         var data = Assert.IsType<TurnoDto>(createdResult.Value);
@@ -219,13 +193,12 @@ public class TurnosControllerTests
             Dias = new List<TurnoDiaDto>()
         };
 
+        // Devuelve una Tupla booleana indicando Exito = true
         mockService.Setup(s => s.ActualizarAsync(3, 1, request))
-            .ReturnsAsync(true);
+            .ReturnsAsync((true, string.Empty));
 
         var controller = CreateController(mockService, empresaId: 1);
-
         var result = await controller.PutTurno(3, request);
-
         Assert.IsType<NoContentResult>(result);
     }
 
@@ -233,31 +206,27 @@ public class TurnosControllerTests
     public async Task DeleteTurno_Existente_RetornaNoContent()
     {
         var mockService = new Mock<ITurnoService>();
+
+        // Devuelve una Tupla booleana indicando Exito = true
         mockService.Setup(s => s.EliminarAsync(4, 1))
-            .ReturnsAsync(true);
+            .ReturnsAsync((true, string.Empty));
 
         var controller = CreateController(mockService, empresaId: 1);
-
         var result = await controller.DeleteTurno(4);
-
         Assert.IsType<NoContentResult>(result);
     }
 
     // ==========================================
     // VALIDACIONES Y FALLOS DE NEGOCIO
     // ==========================================
-
     [Fact]
     public async Task GetTurno_NoEncontrado_RetornaNotFound()
     {
         var mockService = new Mock<ITurnoService>();
         mockService.Setup(s => s.ObtenerPorIdAsync(99, 1))
             .ReturnsAsync((TurnoDto?)null);
-
         var controller = CreateController(mockService, empresaId: 1);
-
         var result = await controller.GetTurno(99);
-
         Assert.IsType<NotFoundResult>(result.Result);
     }
 
@@ -265,9 +234,11 @@ public class TurnosControllerTests
     public async Task PostTurno_NombreVacio_RetornaBadRequest()
     {
         var mockService = new Mock<ITurnoService>();
+        var request = new TurnoCrearDto { Nombre = "   " };
+        mockService.Setup(service => service.CrearAsync(1, request))
+            .ReturnsAsync(((TurnoDto?)null, "El nombre del turno es obligatorio."));
         var controller = CreateController(mockService, empresaId: 1);
 
-        var request = new TurnoCrearDto { Nombre = "   " };
         var result = await controller.PostTurno(request);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
@@ -277,9 +248,11 @@ public class TurnosControllerTests
     public async Task PostTurno_SinDias_RetornaBadRequest()
     {
         var mockService = new Mock<ITurnoService>();
+        var request = new TurnoCrearDto { Nombre = "Turno Valido", Dias = new List<TurnoDiaDto>() };
+        mockService.Setup(service => service.CrearAsync(1, request))
+            .ReturnsAsync(((TurnoDto?)null, "El turno debe contener al menos un día asignado."));
         var controller = CreateController(mockService, empresaId: 1);
 
-        var request = new TurnoCrearDto { Nombre = "Turno Valido", Dias = new List<TurnoDiaDto>() };
         var result = await controller.PostTurno(request);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
@@ -290,13 +263,13 @@ public class TurnosControllerTests
     {
         var mockService = new Mock<ITurnoService>();
         var request = new TurnoCrearDto { Nombre = "Turno Valido" };
+
+        // Devuelve una Tupla booleana indicando Exito = false
         mockService.Setup(s => s.ActualizarAsync(99, 1, request))
-            .ReturnsAsync(false);
+            .ReturnsAsync((false, "No encontrado"));
 
         var controller = CreateController(mockService, empresaId: 1);
-
         var result = await controller.PutTurno(99, request);
-
         Assert.IsType<NotFoundResult>(result);
     }
 
@@ -304,13 +277,13 @@ public class TurnosControllerTests
     public async Task DeleteTurno_NoEncontrado_RetornaNotFound()
     {
         var mockService = new Mock<ITurnoService>();
+
+        // Devuelve una Tupla booleana indicando Exito = false
         mockService.Setup(s => s.EliminarAsync(99, 1))
-            .ReturnsAsync(false);
+            .ReturnsAsync((false, "No encontrado"));
 
         var controller = CreateController(mockService, empresaId: 1);
-
         var result = await controller.DeleteTurno(99);
-
         Assert.IsType<NotFoundResult>(result);
     }
 }

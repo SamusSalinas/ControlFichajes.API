@@ -1,18 +1,21 @@
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
+using ControlFichajes.API.Extensions;
+using ControlFichajes.API.Security;
 using Microsoft.EntityFrameworkCore;
-using System.Globalization;
 
 namespace ControlFichajes.API.Services;
 
 public class TurnoService : ITurnoService
 {
     private readonly AppDbContext _context;
+    private readonly ITurnoValidacionRules _validador;
 
-    public TurnoService(AppDbContext context)
+    public TurnoService(AppDbContext context, ITurnoValidacionRules validador)
     {
         _context = context;
+        _validador = validador;
     }
 
     public async Task<IEnumerable<TurnoDto>> ObtenerPorEmpresaAsync(int empresaId)
@@ -23,7 +26,7 @@ public class TurnoService : ITurnoService
             .Where(t => t.EmpresaId == empresaId && t.Activo)
             .ToListAsync();
 
-        return turnos.Select(MapearDto).ToList();
+        return turnos.Select(t => t.ToDto()).ToList();
     }
 
     public async Task<TurnoDto?> ObtenerPorIdAsync(int id, int empresaId)
@@ -33,111 +36,59 @@ public class TurnoService : ITurnoService
             .Include(t => t.Dias)
             .FirstOrDefaultAsync(t => t.Id == id && t.EmpresaId == empresaId && t.Activo);
 
-        return turno == null ? null : MapearDto(turno);
+        return turno?.ToDto();
     }
 
-    public async Task<TurnoDto> CrearAsync(int empresaId, TurnoCrearDto dto)
+    public async Task<(TurnoDto? Turno, string? Error)> CrearAsync(int empresaId, TurnoCrearDto dto)
     {
-        ValidarTurno(dto);
+        var error = _validador.Validar(dto);
+        if (error != null) return (null, error);
+
         var turno = new Turno
         {
             Nombre = dto.Nombre.Trim(),
             ToleranciaMinutos = dto.ToleranciaMinutos,
             EmpresaId = empresaId,
             Activo = true,
-            Dias = MapearDias(dto.Dias)
+            Dias = dto.Dias.ToEntityList()
         };
 
         _context.Turno.Add(turno);
         await _context.SaveChangesAsync();
 
-        return MapearDto(turno);
+        return (turno.ToDto(), null);
     }
 
-    public async Task<bool> ActualizarAsync(int id, int empresaId, TurnoCrearDto dto)
+    public async Task<(bool Exito, string? Error)> ActualizarAsync(int id, int empresaId, TurnoCrearDto dto)
     {
-        ValidarTurno(dto);
+        var error = _validador.Validar(dto);
+        if (error != null) return (false, error);
+
         var turno = await _context.Turno
             .Include(t => t.Dias)
             .FirstOrDefaultAsync(t => t.Id == id && t.EmpresaId == empresaId && t.Activo);
 
-        if (turno == null)
-            return false;
+        if (turno == null) return (false, "Turno no encontrado.");
 
         turno.Nombre = dto.Nombre.Trim();
         turno.ToleranciaMinutos = dto.ToleranciaMinutos;
 
         _context.TurnoDia.RemoveRange(turno.Dias);
-        turno.Dias = MapearDias(dto.Dias, turno.Id);
+        turno.Dias = dto.Dias.ToEntityList(turno.Id);
 
         await _context.SaveChangesAsync();
-        return true;
+        return (true, null);
     }
 
-    public async Task<bool> EliminarAsync(int id, int empresaId)
+    public async Task<(bool Exito, string? Error)> EliminarAsync(int id, int empresaId)
     {
         var turno = await _context.Turno
             .FirstOrDefaultAsync(t => t.Id == id && t.EmpresaId == empresaId && t.Activo);
 
-        if (turno == null)
-            return false;
+        if (turno == null) return (false, "Turno no encontrado.");
 
         turno.Activo = false;
         await _context.SaveChangesAsync();
-        return true;
-    }
-
-    private static TurnoDto MapearDto(Turno turno)
-    {
-        return new TurnoDto
-        {
-            Id = turno.Id,
-            Nombre = turno.Nombre,
-            ToleranciaMinutos = turno.ToleranciaMinutos,
-            Dias = turno.Dias.Select(d => new TurnoDiaDto
-            {
-                DiaSemana = d.DiaSemana,
-                HoraEntrada = d.HoraEntrada.ToString(@"hh\:mm"),
-                HoraSalida = d.HoraSalida.ToString(@"hh\:mm"),
-                MinutosAlmuerzo = d.MinutosAlmuerzo
-            }).ToList()
-        };
-    }
-
-    private static List<TurnoDia> MapearDias(IEnumerable<TurnoDiaDto> dias, int? turnoId = null)
-    {
-        return dias.Select(d => new TurnoDia
-        {
-            TurnoId = turnoId ?? 0,
-            DiaSemana = d.DiaSemana,
-            HoraEntrada = TimeSpan.Parse(d.HoraEntrada, CultureInfo.InvariantCulture),
-            HoraSalida = TimeSpan.Parse(d.HoraSalida, CultureInfo.InvariantCulture),
-            MinutosAlmuerzo = 60
-        }).ToList();
-    }
-
-    private static void ValidarTurno(TurnoCrearDto? dto)
-    {
-        if (dto == null)
-            throw new ArgumentException("El cuerpo de la solicitud es obligatorio.");
-        if (string.IsNullOrWhiteSpace(dto.Nombre))
-            throw new ArgumentException("El nombre del turno es obligatorio.");
-        if (dto.ToleranciaMinutos is < 0 or > 1440)
-            throw new ArgumentException("La tolerancia debe estar entre 0 y 1440 minutos.");
-        if (dto.Dias == null || dto.Dias.Count == 0)
-            throw new ArgumentException("El turno debe contener al menos un día asignado.");
-        if (dto.Dias.Any(d => d.DiaSemana is < 0 or > 6))
-            throw new ArgumentException("DiaSemana debe estar entre 0 (domingo) y 6 (sábado).");
-        if (dto.Dias.Select(d => d.DiaSemana).Distinct().Count() != dto.Dias.Count)
-            throw new ArgumentException("No puede haber más de un horario para el mismo día de semana.");
-
-        foreach (var dia in dto.Dias)
-        {
-            if (!TimeSpan.TryParse(dia.HoraEntrada, CultureInfo.InvariantCulture, out var entrada) ||
-                !TimeSpan.TryParse(dia.HoraSalida, CultureInfo.InvariantCulture, out var salida) ||
-                entrada < TimeSpan.Zero || salida > TimeSpan.FromDays(1) ||
-                salida - entrada < TimeSpan.FromMinutes(60))
-                throw new ArgumentException("Cada día requiere horas válidas del mismo día y una duración de al menos 60 minutos.");
-        }
+        return (true, null);
     }
 }
