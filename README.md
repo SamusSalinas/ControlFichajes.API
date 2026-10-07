@@ -505,6 +505,149 @@ DELETE /api/departamentos/{id}
 - Los endpoints de consulta y creación devuelven DTOs planos (`id`, `nombre`, `sucursalId`) evitando ciclos de serialización.
 - POST `/api/departamentos` valida unicidad de nombre por sucursal: si ya existe un departamento con el mismo nombre en la misma sucursal, devuelve 409 Conflict. El mismo nombre en una sucursal distinta sí está permitido.
 
+### Turnos
+
+```text
+GET    /api/turnos
+GET    /api/turnos/{id}
+POST   /api/turnos
+PUT    /api/turnos/{id}
+DELETE /api/turnos/{id}
+```
+
+- Permite definir y gestionar los horarios de trabajo asignables a los empleados.
+- Todos los endpoints operan exclusivamente con DTOs planos (`TurnoDto`, `TurnoCrearDto`, `TurnoDiaDto`), evitando dependencias directas con los modelos de datos en el contrato público.
+- Las consultas `GET` permiten visualizar horarios semanales por día (`DiaSemana`: domingo `0` a sábado `6`, `HoraEntrada`, `HoraSalida`). La comida es de 60 minutos, común para todos; el tiempo trabajado se calcula con fichadas reales de entrada/salida, incluyendo salida y reentrada para comer.
+- `ToleranciaMinutos` se define desde el frontend por turno; `0` significa que no hay tolerancia.
+- Las operaciones de creación, edición y eliminación (`POST`, `PUT`, `DELETE`) están restringidas a los roles `SuperAdmin` y `ADMIN`.
+- Todas las operaciones están estrictamente aisladas por el contexto de empresa del usuario autenticado (`empresa_id`).
+
+Ejemplo de turno recurrente:
+
+```http
+POST /api/turnos
+Authorization: Bearer <token-admin>
+Content-Type: application/json
+```
+
+```json
+{
+  "nombre": "Administración",
+  "toleranciaMinutos": 5,
+  "dias": [
+    { "diaSemana": 1, "horaEntrada": "09:00", "horaSalida": "18:00" },
+    { "diaSemana": 2, "horaEntrada": "09:00", "horaSalida": "18:00" },
+    { "diaSemana": 3, "horaEntrada": "10:00", "horaSalida": "18:00" },
+    { "diaSemana": 4, "horaEntrada": "09:00", "horaSalida": "18:00" },
+    { "diaSemana": 5, "horaEntrada": "09:00", "horaSalida": "17:00" }
+  ]
+}
+```
+
+Asignar el turno a un empleado con vigencia e historial:
+
+```http
+POST /api/jornadas/empleados/12/asignaciones
+Authorization: Bearer <token-admin>
+Content-Type: application/json
+```
+
+```json
+{
+  "turnoId": 3,
+  "fechaInicio": "2026-10-01",
+  "fechaFin": null
+}
+```
+
+Una asignación nueva desde una fecha cierra la asignación anterior el día
+previo; no reescribe el historial. El turno puede reutilizarse para varios
+empleados.
+
+Consultar el calendario efectivo, incluidos días libres y excepciones:
+
+```http
+GET /api/jornadas/empleados/12/calendario?desde=2026-10-01&hasta=2026-10-31
+Authorization: Bearer <token>
+```
+
+El resultado indica `tieneTurnoAsignado`, `tieneHorarioConfigurado` y
+`esDiaLibre`. Un turno asignado sin días semanales definidos no se interpreta
+como descanso: debe configurarse antes de calcular sus horas. La instancia
+actual tiene filas heredadas `Empleado.TurnoId`, pero `TurnoDia` está vacío;
+esas asignaciones se migran desde la fecha de corte y sus días deben cargarse
+según el horario real del cliente.
+
+Sobrescribir únicamente una fecha (una jornada o día libre):
+
+```http
+PUT /api/jornadas/empleados/12/dias/2026-10-15
+Authorization: Bearer <token-admin>
+Content-Type: application/json
+```
+
+```json
+{
+  "esDiaLibre": false,
+  "horaEntrada": "10:00",
+  "horaSalida": "16:00",
+  "toleranciaMinutos": 0
+}
+```
+
+`DELETE /api/jornadas/empleados/12/dias/2026-10-15` elimina la excepción y
+restaura el horario recurrente para esa fecha. Cambiar el turno con una nueva
+fecha de inicio es distinto: crea/actualiza la vigencia del turno hacia el
+futuro y conserva la asignación anterior.
+
+### Horas, reposiciones y alertas
+
+```text
+GET  /api/jornadas/empleados/{id}/resumen?desde=2026-10-01&hasta=2026-10-31
+GET  /api/jornadas/empleados/{id}/reposiciones?desde=2026-10-01&hasta=2026-10-31
+POST /api/jornadas/empleados/{id}/reposiciones
+GET  /api/fichadas/alertas/incompletas?desde=2026-10-01&hasta=2026-10-31
+```
+
+El resumen expresa horas en minutos e incluye saldo diario/total, tardanza por
+encima de la tolerancia y reposiciones aprobadas. Registrar reposición:
+
+```json
+{
+  "fecha": "2026-10-15",
+  "minutos": 60,
+  "detalle": "Reposición autorizada"
+}
+```
+
+Las reposiciones y cambios de calendario requieren `ADMIN` o `SuperAdmin`.
+Las alertas web se consultan con polling mediante el `GET` anterior, solo por
+`ADMIN`/`SuperAdmin`.
+
+### Fichadas manuales
+
+```http
+POST /api/fichadasmanuales
+Authorization: Bearer <token-admin>
+Content-Type: application/json
+```
+
+```json
+{
+  "empleadoId": 12,
+  "fechaHora": "2026-10-01T09:00:00",
+  "tipo": "Entrada",
+  "motivo": "OlvidoDeFichaje",
+  "detalle": "El lector no registró la entrada"
+}
+```
+
+Solo `ADMIN` y `SuperAdmin` pueden crear una fichada manual; `RRHH` no. El
+motivo debe pertenecer al catálogo de observaciones. La fichada queda marcada
+con `esManual: true`, `metodo: "Manual"` y conserva usuario/fecha de auditoría.
+`GET /api/fichadas` incluye esos campos para distinguirla de una lectura
+biométrica.
+
 ## Empleados y huellas
 
 ```text
@@ -578,6 +721,19 @@ El endpoint `GET` devuelve:
 - `fechaHora`
 - `tipo`
 - `metodo`
+- `esManual`
+- `estado`
+- `minutosHastaCorte` (solo para jornadas incompletas)
+- `observacion` (motivo, detalle y auditoría, cuando existe)
+
+### Procesamiento automático (CorteMedianocheWorker)
+
+El sistema incluye un servicio en segundo plano (`CorteMedianocheWorker` registrado mediante `AddHostedService`) que se ejecuta a la medianoche:
+
+- Detecta automáticamente las fichadas de entrada del día anterior que no registraron su correspondiente marca de salida.
+- Actualiza el estado de la fichada a `Incompleto`.
+- Persiste los minutos desde la entrada hasta las 00:00 en `MinutosHastaCorte`; una entrada del día siguiente no cierra la jornada anterior.
+- Expone las jornadas que requieren revisión en `GET /api/fichadas/alertas/incompletas`.
 
 ## Desarrollo local
 
@@ -663,6 +819,8 @@ La validación actual cubre:
 - enrolamiento de huellas para empleados activos
 - creación de departamentos con DTOs planos y prevención de ciclos JSON
 - validación de departamentos duplicados por sucursal y restricción de creación/modificación para rol RRHH
+- corte de medianoche de fichadas abiertas (marcado `Incompleto` y cálculo de horas) vía `CorteMedianocheWorker`
+- operaciones CRUD de turnos y sus horarios diarios aisladas por tenant de empresa y con mocks de `Moq` y `xUnit` (`TurnosControllerTests` y `TurnoServiceTests`)
 
 El documento OpenAPI se publica en desarrollo mediante `MapOpenApi`.
 

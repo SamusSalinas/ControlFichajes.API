@@ -1,0 +1,11 @@
+Intervalos para lahora de almuerzo y que estos resten el tiempo que dura el intervalo a las horas trabajadas
+
+Poder asignar horarios diferentes por dia 
+
+Si olvidan fichar un dia que no contabilice la entrada del dia siguiente como la salida del dia interior (Limitar a que dia se asigna la fichada antes de las 00:00)
+
+Controlar la reposición de horas 
+
+Poder agregar una fichada de forma manual
+
+Y poder asignar un turno que tenga horarios diferentes para cada dia de la semana pero que se mantenga en el tiempo. Y que un dia de ese turno se pueda sobreescribir con la asignación manual por dia.

@@ -45,6 +45,11 @@ namespace ControlFichajes.API.Models
         [ForeignKey(nameof(SucursalId))]
         public virtual Sucursal? SucursalEntidad { get; set; }
 
+        public int? TurnoId { get; set; }
+
+        [ForeignKey(nameof(TurnoId))]
+        public virtual Turno? TurnoActual { get; set; }
+
         [MaxLength(50)]
         public string? Horario { get; set; }
 
@@ -54,5 +59,8 @@ namespace ControlFichajes.API.Models
         // Propiedades de navegación
         public virtual ICollection<Huella> Huellas { get; set; } = new List<Huella>();
         public virtual ICollection<Fichada> Fichadas { get; set; } = new List<Fichada>();
+        public virtual ICollection<EmpleadoTurno> AsignacionesTurno { get; set; } = new List<EmpleadoTurno>();
+        public virtual ICollection<EmpleadoJornadaExcepcion> ExcepcionesJornada { get; set; } = new List<EmpleadoJornadaExcepcion>();
+        public virtual ICollection<ReposicionHoras> ReposicionesHoras { get; set; } = new List<ReposicionHoras>();
     }
 }
