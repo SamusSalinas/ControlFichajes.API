@@ -189,8 +189,10 @@ ruta. La tabla actual solo dispone de `UltimoAcceso`, por lo que ese es el dato
 de estado persistido.
 
 Los tokens de agente pueden consumir el catálogo de empleados, huellas,
-enrolamiento y `POST /api/fichadas/bulk`. No pueden acceder a las operaciones
-web de gestión, empresas, sucursales, usuarios ni fichadas históricas.
+enrolamiento y `POST /api/fichadas/biometricas/bulk`. También se conserva
+`POST /api/fichadas/bulk` para integraciones existentes. Los agentes no pueden
+acceder a las operaciones web de gestión, empresas, sucursales, usuarios ni
+fichadas históricas.
 
 ## Empresas, usuarios, sucursales y departamentos
 
@@ -694,6 +696,24 @@ La plantilla debe ser FMD ANSI binaria serializada como Base64. No se acepta mez
 ```text
 GET  /api/fichadas?empleadoId=1&desde=2026-08-01&hasta=2026-09-01&tipo=Entrada&metodo=Biometrico&limite=100
 POST /api/fichadas/bulk
+POST /api/fichadas/biometricas/bulk
+```
+
+El endpoint biométrico recibe una lista de eventos con `empleadoId` y
+`fechaHora`; no se debe enviar `tipoRegistro`. La API los procesa en orden
+cronológico, calcula `Entrada` o `Salida` a partir de las fichadas del mismo
+empleado y fecha calendario y no empareja una entrada con una salida del día
+siguiente. Un ingreso antiguo sin salida se marca incompleto hasta el corte de
+medianoche. El endpoint requiere un token de agente, acepta hasta 500 eventos
+y responde `{ "recibidas": n }` tras persistir el lote.
+
+```json
+[
+  {
+    "empleadoId": 1,
+    "fechaHora": "2026-10-12T08:59:00"
+  }
+]
 ```
 
 Los valores válidos para `TipoRegistro` son:
@@ -1017,4 +1037,3 @@ Cors__AllowedOrigins__0=http://localhost:5173
 - Utilizar una clave JWT larga y aleatoria en producción.
 - Limitar los orígenes CORS a los frontends autorizados.
 - Utilizar HTTPS cuando el sistema pase de la etapa de pruebas a un entorno definitivo.
-
