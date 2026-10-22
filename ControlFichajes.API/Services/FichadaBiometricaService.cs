@@ -58,8 +58,16 @@ public sealed class FichadaBiometricaService
                      .OrderBy(s => s.EmpleadoId)
                      .ThenBy(s => s.FechaHora))
         {
-            var eventoPrevio = nuevosEventos
-                .Concat(eventosDelRango)
+            var eventosConocidos = nuevosEventos.Concat(eventosDelRango).ToList();
+            if (eventosConocidos.Any(f =>
+                    f.EmpleadoId == solicitud.EmpleadoId &&
+                    f.FechaHora == solicitud.FechaHora &&
+                    f.Metodo == MetodoBiometrico))
+            {
+                continue;
+            }
+
+            var eventoPrevio = eventosConocidos
                 .Where(f => f.EmpleadoId == solicitud.EmpleadoId &&
                             f.FechaHora.Date == solicitud.FechaHora.Date &&
                             f.FechaHora <= solicitud.FechaHora)
@@ -93,6 +101,6 @@ public sealed class FichadaBiometricaService
 
         _context.Fichada.AddRange(nuevosEventos);
         await _context.SaveChangesAsync(cancellationToken);
-        return new FichadaBiometricaResultado { Recibidas = nuevosEventos.Count };
+        return new FichadaBiometricaResultado { Recibidas = solicitudes.Count };
     }
 }

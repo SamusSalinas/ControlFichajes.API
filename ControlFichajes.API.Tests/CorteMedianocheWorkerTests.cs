@@ -149,4 +149,28 @@ public class CorteMedianocheWorkerTests
         Assert.NotNull(fichadaSinCambio);
         Assert.Equal("Completada", fichadaSinCambio.Estado);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_NoProcesaFichadasAlIniciarElServicio()
+    {
+        var (scopeFactory, context) = CrearAmbientePrueba();
+        var worker = new CorteMedianocheWorker(scopeFactory, NullLogger<CorteMedianocheWorker>.Instance);
+        var entradaAbierta = new Fichada
+        {
+            Id = 1,
+            EmpleadoId = 10,
+            FechaHora = DateTime.Today.AddDays(-1).AddHours(9),
+            TipoRegistro = RegistroTipos.Entrada,
+            Estado = "Completada"
+        };
+        context.Fichada.Add(entradaAbierta);
+        await context.SaveChangesAsync();
+
+        await worker.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await worker.StopAsync(timeout.Token);
+
+        var fichadaSinCambio = await context.Fichada.AsNoTracking().FirstAsync(f => f.Id == entradaAbierta.Id);
+        Assert.Equal("Completada", fichadaSinCambio.Estado);
+    }
 }
