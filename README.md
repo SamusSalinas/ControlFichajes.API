@@ -189,8 +189,10 @@ ruta. La tabla actual solo dispone de `UltimoAcceso`, por lo que ese es el dato
 de estado persistido.
 
 Los tokens de agente pueden consumir el catálogo de empleados, huellas,
-enrolamiento y `POST /api/fichadas/bulk`. No pueden acceder a las operaciones
-web de gestión, empresas, sucursales, usuarios ni fichadas históricas.
+enrolamiento y `POST /api/fichadas/biometricas/bulk`. También se conserva
+`POST /api/fichadas/bulk` para integraciones existentes. Los agentes no pueden
+acceder a las operaciones web de gestión, empresas, sucursales, usuarios ni
+fichadas históricas.
 
 ## Empresas, usuarios, sucursales y departamentos
 
@@ -694,6 +696,28 @@ La plantilla debe ser FMD ANSI binaria serializada como Base64. No se acepta mez
 ```text
 GET  /api/fichadas?empleadoId=1&desde=2026-08-01&hasta=2026-09-01&tipo=Entrada&metodo=Biometrico&limite=100
 POST /api/fichadas/bulk
+POST /api/fichadas/biometricas/bulk
+```
+
+El endpoint biométrico recibe una lista de eventos con `empleadoId` y
+`fechaHora`; no se debe enviar `tipoRegistro`. La API los procesa en orden
+cronológico, calcula `Entrada` o `Salida` a partir de las fichadas del mismo
+empleado y fecha calendario y no empareja una entrada con una salida del día
+siguiente. Un ingreso antiguo sin salida se marca incompleto hasta el corte de
+medianoche. El endpoint requiere un token de agente, acepta hasta 500 eventos
+y responde `{ "recibidas": n }` tras aceptar el lote. Reenviar un evento
+biométrico del mismo empleado con la misma fecha y hora no crea otra fichada;
+esto permite reintentar una solicitud si se pierde la respuesta HTTP. La
+cantidad confirmada incluye eventos ya registrados que se reconocen como
+reintentos.
+
+```json
+[
+  {
+    "empleadoId": 1,
+    "fechaHora": "2026-10-12T08:59:00"
+  }
+]
 ```
 
 Los valores válidos para `TipoRegistro` son:
@@ -734,6 +758,7 @@ El sistema incluye un servicio en segundo plano (`CorteMedianocheWorker` registr
 - Actualiza el estado de la fichada a `Incompleto`.
 - Persiste los minutos desde la entrada hasta las 00:00 en `MinutosHastaCorte`; una entrada del día siguiente no cierra la jornada anterior.
 - Expone las jornadas que requieren revisión en `GET /api/fichadas/alertas/incompletas`.
+- Al iniciar la API, espera a la próxima medianoche y no procesa retroactivamente el día anterior.
 
 ## Desarrollo local
 
@@ -756,7 +781,7 @@ Ejemplo de estructura:
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=dev_user;Pwd=REEMPLAZAR;"
+    "DefaultConnection": "Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=REEMPLAZAR;Pwd=REEMPLAZAR;"
   },
   "Jwt": {
     "Key": "REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA",
@@ -813,6 +838,78 @@ La validación actual cubre:
 - listado de sucursales con contexto SuperAdmin
 - alta, autenticación y desactivación de agentes
 - claims tenant del JWT de agente
+- límites de lote, validación de empleados y autorización del endpoint biométrico
+- orden cronológico, separación por empleado/día, fichadas iguales y reintentos
+
+### Aceptación explícita contra `.devs` de producción
+
+La prueba `ProductionBiometricAcceptanceTests` está omitida por defecto. Usa
+el servicio HTTP de producción y una conexión de lectura/escritura a MySQL, por
+lo que solo debe habilitarse después de provisionar en `.devs` un agente y un
+empleado dedicado a pruebas cuyo legajo comience con `TEST-AUTOMATION-`.
+La prueba valida el host HTTPS, el `empresa_id` del token, el nombre de la
+empresa y la empresa/estado/legajo del empleado; selecciona un día futuro vacío,
+envía dos fichadas y elimina solamente filas biométricas del empleado de prueba
+con las marcas de tiempo generadas por esa ejecución. No crea ni modifica
+empleados, agentes o empresas.
+
+Configura estas variables solo en el entorno local del proceso o en un almacén
+de secretos de CI; no las guardes en archivos del repositorio:
+
+- `CFB_PRODUCTION_TEST_OPT_IN` con el valor literal
+  `WRITE_TEST_PUNCHES_IN_DEVS_PRODUCTION`
+- `CFB_PRODUCTION_TEST_API_BASE_URL` y `CFB_PRODUCTION_TEST_API_HOST`
+- `CFB_PRODUCTION_TEST_DB_CONNECTION`
+- `CFB_PRODUCTION_TEST_AGENT_CLIENT_ID` y `CFB_PRODUCTION_TEST_AGENT_CLIENT_SECRET`
+- `CFB_PRODUCTION_TEST_COMPANY_ID` y `CFB_PRODUCTION_TEST_EMPLOYEE_ID`
+
+Para ejecutarla explícitamente:
+
+```powershell
+dotnet test ControlFichajes.API.Tests/ControlFichajes.API.Tests.csproj -nologo --filter "FullyQualifiedName~ProductionBiometricAcceptanceTests"
+```
+
+Si falla la verificación o limpieza, inspecciona el empleado de automatización
+y el día futuro de esa ejecución antes de repetirla. Nunca uses un empleado
+real. Las pruebas unitarias/HTTP normales no requieren estas variables y no
+acceden a producción.
+
+### Aceptación local con túnel SSH y lector físico
+
+`LocalTunnelBiometricAcceptanceTests` está omitida por defecto. La prueba solo
+se habilita con el opt-in explícito y verifica el agente, el tenant `.devs`, el
+empleado dedicado cuyo legajo comienza por `TEST-AUTOMATION-`, la huella del
+dedo seleccionado creada durante la ejecución y un día futuro sin fichadas.
+Envía dos fichadas biométricas a la API local y limpia únicamente esa huella y
+las fichadas biométricas del empleado dedicado con fecha desde el inicio
+configurado, incluso si una aserción falla. Por eso el inicio debe ser anterior
+al enrolamiento y no se deben usar otras operaciones con ese empleado durante
+la prueba. La API local sigue conectada a la base remota mediante túnel; no es
+una base aislada.
+
+Arranca la API local en `http://localhost:5052` con su configuración local
+ignorada por Git y abre el túnel SSH hacia MySQL en `localhost:3307`. Después,
+configura las siguientes variables solo en el entorno del proceso de pruebas;
+no guardes secretos ni cadenas de conexión en el repositorio:
+
+- `CFB_LOCAL_TUNNEL_TEST_OPT_IN` con el valor literal
+  `WRITE_TEST_DATA_FOR_DEDICATED_DEVS_EMPLOYEE`
+- `CFB_LOCAL_TEST_API_BASE_URL` (debe ser `http://localhost:5052/`)
+- `CFB_LOCAL_TEST_DB_CONNECTION` y `CFB_LOCAL_TEST_DB_NAME`
+- `CFB_LOCAL_TEST_AGENT_CLIENT_ID` y `CFB_LOCAL_TEST_AGENT_CLIENT_SECRET`
+- `CFB_LOCAL_TEST_COMPANY_ID`, `CFB_LOCAL_TEST_EMPLOYEE_ID` y
+  `CFB_LOCAL_TEST_EMPLOYEE_LEGAJO`
+- `CFB_LOCAL_TEST_FINGER_INDEX` (1–10) y `CFB_LOCAL_TEST_STARTED_AT_UTC`
+
+Registra el valor UTC de inicio **antes** de enrolar el dedo de prueba y
+ejecuta la prueba después del enrolamiento desde la aplicación. La aceptación
+no crea el template: comprueba el que la aplicación acaba de guardar. No la
+ejecutes con otro empleado ni habilites el opt-in en CI.
+
+```powershell
+dotnet test ControlFichajes.API.Tests/ControlFichajes.API.Tests.csproj --filter "FullyQualifiedName~LocalTunnelBiometricAcceptanceTests"
+```
+
 - prevención de duplicados en DNI/CUIL
 - actualización de empleados activos vía PATCH
 - baja lógica (soft delete) de empleados
@@ -859,7 +956,7 @@ La configuración debe incluir la conexión a MySQL y las variables necesarias p
 Ejemplo:
 
 ```env
-ConnectionStrings__DefaultConnection=Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=dev_user;Pwd=REEMPLAZAR;
+ConnectionStrings__DefaultConnection=Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=REEMPLAZAR;Pwd=REEMPLAZAR;
 
 Jwt__Key=REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA
 Jwt__Issuer=ControlFichajes.API
@@ -892,7 +989,7 @@ El contenedor utiliza la red del host para alcanzar MySQL mediante:
 La API queda disponible actualmente en:
 
 ```text
-http://161.153.193.159:8080
+http://<host-de-produccion>:8080
 ```
 
 Para actualizar el despliegue después de nuevos cambios:
@@ -991,13 +1088,13 @@ public int IndiceDedo { get; set; }
 **Antes (`pruebas/api-estable`)**
 
 ```env
-ConnectionStrings__DefaultConnection=Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=dev_user;Pwd=REEMPLAZAR;
+ConnectionStrings__DefaultConnection=Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=REEMPLAZAR;Pwd=REEMPLAZAR;
 ```
 
 **Después (`pruebas/api-estable-corregida`)**
 
 ```env
-ConnectionStrings__DefaultConnection=Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=dev_user;Pwd=REEMPLAZAR;
+ConnectionStrings__DefaultConnection=Server=127.0.0.1;Port=3306;Database=tesis_db;Uid=REEMPLAZAR;Pwd=REEMPLAZAR;
 
 Jwt__Key=REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA
 Jwt__Issuer=ControlFichajes.API
@@ -1017,4 +1114,3 @@ Cors__AllowedOrigins__0=http://localhost:5173
 - Utilizar una clave JWT larga y aleatoria en producción.
 - Limitar los orígenes CORS a los frontends autorizados.
 - Utilizar HTTPS cuando el sistema pase de la etapa de pruebas a un entorno definitivo.
-

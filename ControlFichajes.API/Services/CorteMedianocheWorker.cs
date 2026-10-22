@@ -20,24 +20,21 @@ public class CorteMedianocheWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var proximaEjecucion = DateTime.Today.AddDays(1);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await ProcesarFichadasAbiertasAsync(DateTime.Today.AddDays(-1), stoppingToken);
+                var tiempoHastaEjecucion = proximaEjecucion - DateTime.Now;
 
-                var ahora = DateTime.Now;
-                var proximaMedianoche = ahora.Date.AddDays(1);
-                var tiempoHastaMedianoche = proximaMedianoche - ahora;
-
-                if (tiempoHastaMedianoche <= TimeSpan.Zero)
+                if (tiempoHastaEjecucion > TimeSpan.Zero)
                 {
-                    tiempoHastaMedianoche = TimeSpan.FromSeconds(1);
+                    await Task.Delay(tiempoHastaEjecucion, stoppingToken);
                 }
 
-                await Task.Delay(tiempoHastaMedianoche, stoppingToken);
-
-                await ProcesarFichadasAbiertasAsync(DateTime.Today.AddDays(-1), stoppingToken);
+                await ProcesarFichadasAbiertasAsync(proximaEjecucion.AddDays(-1), stoppingToken);
+                proximaEjecucion = proximaEjecucion.AddDays(1);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

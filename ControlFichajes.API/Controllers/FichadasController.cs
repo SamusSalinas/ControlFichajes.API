@@ -4,6 +4,7 @@ using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Security;
+using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,10 +19,17 @@ public class FichadasController : ControllerBase
     private const string PuedeEscribirObservacionFichada = "PuedeEscribirObservacionFichada";
 
     private readonly AppDbContext _context;
+    private readonly FichadaBiometricaService _fichadaBiometricaService;
 
     public FichadasController(AppDbContext context)
+        : this(context, new FichadaBiometricaService(context))
+    {
+    }
+
+    public FichadasController(AppDbContext context, FichadaBiometricaService fichadaBiometricaService)
     {
         _context = context;
+        _fichadaBiometricaService = fichadaBiometricaService;
     }
 
     [HttpGet]
@@ -241,6 +249,26 @@ public class FichadasController : ControllerBase
         await _context.SaveChangesAsync();
 
         return Ok(new { recibidas = registros.Count });
+    }
+
+    [HttpPost("biometricas/bulk")]
+    [Authorize(Policy = "SoloAgente")]
+    public async Task<IActionResult> PostBulkBiometricas([FromBody] List<FichadaRequestDto> fichadas)
+    {
+        if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaIdUsuario))
+            return Forbid();
+        if (fichadas is null || fichadas.Count == 0)
+            return BadRequest(new { mensaje = "No se recibieron fichadas." });
+        if (fichadas.Count > 500)
+            return BadRequest(new { mensaje = "El lote no puede superar 500 fichadas." });
+        if (fichadas.Any(f => f is null || f.EmpleadoId <= 0 || f.FechaHora == default))
+            return BadRequest(new { mensaje = "EmpleadoId y FechaHora son obligatorios." });
+
+        var resultado = await _fichadaBiometricaService.RegistrarAsync(fichadas, empresaIdUsuario);
+        if (resultado.Error is not null)
+            return BadRequest(new { mensaje = resultado.Error });
+
+        return Ok(new { recibidas = resultado.Recibidas });
     }
 
     private IQueryable<Fichada> ConsultaFichadasDeEmpresa(int empresaId)
