@@ -1,0 +1,4 @@
+-- Reservado. Este archivo no contiene DDL y no modifica ninguna base.
+-- No forma parte de la instalación limpia ni de la actualización.
+-- El esquema estructural actual está en 20261023_esquema.sql.
+-- El orden de ambos caminos está en README.md.

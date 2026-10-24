@@ -31,5 +31,13 @@ namespace ControlFichajes.API.Models
         public string Estado { get; set; } = "Completada";
 
         public int? MinutosHastaCorte { get; set; }
+
+        /// <summary>
+        /// Clave única de un evento biométrico. Las fichadas manuales y las
+        /// filas anteriores quedan en null: MySQL admite varias filas null
+        /// en un índice UNIQUE.
+        /// </summary>
+        [MaxLength(40)]
+        public string? ClaveIdempotencia { get; set; }
     }
 }

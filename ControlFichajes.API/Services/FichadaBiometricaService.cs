@@ -1,3 +1,4 @@
+using System.Globalization;
 using ControlFichajes.API.Constants;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
@@ -5,6 +6,31 @@ using ControlFichajes.API.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace ControlFichajes.API.Services;
+
+public static class FichadaBiometricaIdempotencia
+{
+    public const string Indice = "UX_Fichada_ClaveIdempotencia";
+
+    public static DateTime Normalizar(DateTime fechaHora)
+    {
+        var pared = LaborTime.Pared(fechaHora);
+        var ticks = pared.Ticks - (pared.Ticks % TimeSpan.TicksPerMicrosecond);
+        return new DateTime(ticks, DateTimeKind.Unspecified);
+    }
+
+    public static string Clave(int empleadoId, DateTime fechaHora)
+    {
+        var normalizada = Normalizar(fechaHora);
+        return string.Create(CultureInfo.InvariantCulture, $"b:{empleadoId}:{normalizada:yyyyMMddHHmmssffffff}");
+    }
+
+    public static bool EsConflictoDeClave(DbUpdateException exception)
+    {
+        if (!FichadaObservacionPersistencia.EsDuplicadoClaveMySql(exception))
+            return false;
+        return exception.ToString().Contains(Indice, StringComparison.OrdinalIgnoreCase);
+    }
+}
 
 public sealed class FichadaBiometricaResultado
 {
@@ -44,63 +70,84 @@ public sealed class FichadaBiometricaService
                 Error = "El lote contiene empleados inexistentes o inactivos."
             };
 
-        var fechaDesde = solicitudes.Min(s => s.FechaHora.Date);
-        var fechaHasta = solicitudes.Max(s => s.FechaHora.Date).AddDays(1);
+        var normalizadas = solicitudes
+            .Select(s => (Solicitud: s, FechaHora: FichadaBiometricaIdempotencia.Normalizar(s.FechaHora)))
+            .Select(s => (s.Solicitud, s.FechaHora, Clave: FichadaBiometricaIdempotencia.Clave(s.Solicitud.EmpleadoId, s.FechaHora)))
+            .OrderBy(s => s.Solicitud.EmpleadoId)
+            .ThenBy(s => s.FechaHora)
+            .ToList();
+        var fechaDesde = normalizadas.Min(s => s.FechaHora).Date;
+        var fechaHasta = normalizadas.Max(s => s.FechaHora).Date.AddDays(1);
+        var claves = normalizadas.Select(s => s.Clave).Distinct().ToList();
         var eventosDelRango = await _context.Fichada
             .Where(f => empleadoIds.Contains(f.EmpleadoId) &&
-                        f.FechaHora >= fechaDesde &&
-                        f.FechaHora < fechaHasta)
-            .OrderBy(f => f.FechaHora)
+                        ((f.ClaveIdempotencia != null && claves.Contains(f.ClaveIdempotencia)) ||
+                         (f.FechaHora >= fechaDesde && f.FechaHora < fechaHasta)))
             .ToListAsync(cancellationToken);
         var nuevosEventos = new List<Fichada>(solicitudes.Count);
+        var clavesDelLote = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var solicitud in solicitudes
-                     .OrderBy(s => s.EmpleadoId)
-                     .ThenBy(s => s.FechaHora))
+        foreach (var solicitud in normalizadas)
         {
-            var eventosConocidos = nuevosEventos.Concat(eventosDelRango).ToList();
-            if (eventosConocidos.Any(f =>
-                    f.EmpleadoId == solicitud.EmpleadoId &&
-                    f.FechaHora == solicitud.FechaHora &&
-                    f.Metodo == MetodoBiometrico))
+            if (!clavesDelLote.Add(solicitud.Clave))
+                continue;
+            if (eventosDelRango.Any(f =>
+                    f.EmpleadoId == solicitud.Solicitud.EmpleadoId &&
+                    (f.ClaveIdempotencia == solicitud.Clave ||
+                     (f.Metodo == MetodoBiometrico &&
+                      FichadaBiometricaIdempotencia.Normalizar(f.FechaHora) == solicitud.FechaHora))))
             {
                 continue;
             }
 
-            var eventoPrevio = eventosConocidos
-                .Where(f => f.EmpleadoId == solicitud.EmpleadoId &&
-                            f.FechaHora.Date == solicitud.FechaHora.Date &&
-                            f.FechaHora <= solicitud.FechaHora)
-                .OrderByDescending(f => f.FechaHora)
-                .FirstOrDefault();
-
-            var tipoRegistro = eventoPrevio?.TipoRegistro == RegistroTipos.Entrada
-                ? RegistroTipos.Salida
-                : RegistroTipos.Entrada;
-            var fichada = new Fichada
+            nuevosEventos.Add(new Fichada
             {
-                EmpleadoId = solicitud.EmpleadoId,
+                EmpleadoId = solicitud.Solicitud.EmpleadoId,
                 FechaHora = solicitud.FechaHora,
-                TipoRegistro = tipoRegistro,
-                Metodo = MetodoBiometrico
-            };
-
-            if (tipoRegistro == RegistroTipos.Salida && eventoPrevio != null)
-            {
-                eventoPrevio.Estado = "Completada";
-                eventoPrevio.MinutosHastaCorte = null;
-            }
-            else if (tipoRegistro == RegistroTipos.Entrada && solicitud.FechaHora.Date < DateTime.Today)
-            {
-                fichada.Estado = "Incompleto";
-                fichada.MinutosHastaCorte = (int)(solicitud.FechaHora.Date.AddDays(1) - solicitud.FechaHora).TotalMinutes;
-            }
-
-            nuevosEventos.Add(fichada);
+                TipoRegistro = RegistroTipos.SinTipo,
+                Metodo = MetodoBiometrico,
+                ClaveIdempotencia = solicitud.Clave
+            });
         }
 
-        _context.Fichada.AddRange(nuevosEventos);
-        await _context.SaveChangesAsync(cancellationToken);
+        if (nuevosEventos.Count > 0)
+        {
+            _context.Fichada.AddRange(nuevosEventos);
+            await GuardarIdempotenteAsync(nuevosEventos, cancellationToken);
+        }
+
         return new FichadaBiometricaResultado { Recibidas = solicitudes.Count };
+    }
+
+    private async Task GuardarIdempotenteAsync(List<Fichada> pendientes, CancellationToken cancellationToken)
+    {
+        for (var intento = 0; intento <= pendientes.Count; intento++)
+        {
+            try
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateException ex) when (FichadaBiometricaIdempotencia.EsConflictoDeClave(ex))
+            {
+                foreach (var entry in _context.ChangeTracker.Entries<Fichada>().Where(e => e.State == EntityState.Added).ToList())
+                    entry.State = EntityState.Detached;
+
+                var claves = pendientes.Select(f => f.ClaveIdempotencia).Where(c => c != null).ToList();
+                var ocupadas = await _context.Fichada.AsNoTracking()
+                    .Where(f => f.ClaveIdempotencia != null && claves.Contains(f.ClaveIdempotencia))
+                    .Select(f => f.ClaveIdempotencia!)
+                    .ToListAsync(cancellationToken);
+                var antes = pendientes.Count;
+                pendientes.RemoveAll(f => f.ClaveIdempotencia != null && ocupadas.Contains(f.ClaveIdempotencia));
+                if (pendientes.Count == antes)
+                    throw;
+                if (pendientes.Count == 0)
+                    return;
+                _context.Fichada.AddRange(pendientes);
+            }
+        }
+
+        throw new InvalidOperationException("No se pudo confirmar la fichada biométrica.");
     }
 }

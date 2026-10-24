@@ -1,4 +1,3 @@
-using ControlFichajes.API.Constants;
 using ControlFichajes.API.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,30 +10,31 @@ public class CorteMedianocheWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<CorteMedianocheWorker> _logger;
+    private readonly ILaborClock _clock;
 
-    public CorteMedianocheWorker(IServiceScopeFactory scopeFactory, ILogger<CorteMedianocheWorker> logger)
+    public CorteMedianocheWorker(
+        IServiceScopeFactory scopeFactory,
+        ILogger<CorteMedianocheWorker> logger,
+        ILaborClock? clock = null)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _clock = clock ?? new SystemLaborClock();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var proximaEjecucion = DateTime.Today.AddDays(1);
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var tiempoHastaEjecucion = proximaEjecucion - DateTime.Now;
+                var ahora = LaborTime.Ahora(_clock);
+                var proximaMedianoche = ahora.Date.AddDays(1);
+                var espera = proximaMedianoche - ahora;
+                if (espera > TimeSpan.Zero)
+                    await Task.Delay(espera, stoppingToken);
 
-                if (tiempoHastaEjecucion > TimeSpan.Zero)
-                {
-                    await Task.Delay(tiempoHastaEjecucion, stoppingToken);
-                }
-
-                await ProcesarFichadasAbiertasAsync(proximaEjecucion.AddDays(-1), stoppingToken);
-                proximaEjecucion = proximaEjecucion.AddDays(1);
+                await ProcesarFichadasAbiertasAsync(proximaMedianoche.AddDays(-1), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -43,7 +43,14 @@ public class CorteMedianocheWorker : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error al ejecutar el corte de medianoche para fichadas abiertas.");
-                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
             }
         }
     }
@@ -52,33 +59,47 @@ public class CorteMedianocheWorker : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        var inicioDia = fechaReferencia.Date;
-        var finDia = inicioDia.AddDays(1);
-
-        var fichadasAbiertas = await context.Fichada
-            .Where(f => f.FechaHora >= inicioDia && f.FechaHora < finDia
-                     && f.TipoRegistro == RegistroTipos.Entrada
-                     && f.Estado != "Incompleto"
-                     && !context.Fichada.Any(s => s.EmpleadoId == f.EmpleadoId
-                                               && s.TipoRegistro == RegistroTipos.Salida
-                                               && s.FechaHora >= f.FechaHora
-                                               && s.FechaHora < finDia))
+        var fecha = DateOnly.FromDateTime(fechaReferencia.Date);
+        var inicio = fechaReferencia.Date.AddDays(-1);
+        var fin = fechaReferencia.Date.AddDays(2);
+        var fichadas = await context.Fichada
+            .Where(f => f.FechaHora >= inicio && f.FechaHora < fin)
             .ToListAsync(cancellationToken);
+        if (fichadas.Count == 0)
+            return 0;
 
-        foreach (var fichada in fichadasAbiertas)
+        var empleadoIds = fichadas.Select(f => f.EmpleadoId).Distinct().ToList();
+        var empresas = await context.Empleado
+            .Where(e => empleadoIds.Contains(e.Id))
+            .ToDictionaryAsync(e => e.Id, e => e.EmpresaId, cancellationToken);
+        var porEmpresa = fichadas.GroupBy(f => empresas.GetValueOrDefault(f.EmpleadoId));
+        var marcadas = 0;
+        foreach (var empresa in porEmpresa)
         {
-            fichada.Estado = "Incompleto";
-            fichada.MinutosHastaCorte = Math.Max(0, (int)(finDia - fichada.FechaHora).TotalMinutes);
-
-            _logger.LogInformation(
-                "Fichada {FichadaId} del empleado {EmpleadoId} marcada como Incompleto. Minutos hasta medianoche: {Minutos}",
-                fichada.Id,
-                fichada.EmpleadoId,
-                fichada.MinutosHastaCorte);
+            var consulta = new JornadaClasificacionConsulta(context);
+            var horario = await consulta.CargarHorariosAsync(empresa.Key, empleadoIds, inicio, fin, cancellationToken);
+            var ahora = fechaReferencia.Date.AddDays(1);
+            var clasificacion = JornadaClasificador.Clasificar(
+                empresa.Select(f => new FichadaParaClasificar(f.Id, f.EmpleadoId, empresa.Key, f.FechaHora, f.EsManual)).ToList(),
+                ahora,
+                horario);
+            foreach (var item in clasificacion.Where(c => c.JornadaFecha == fecha && c.JornadaEstado == JornadaClasificador.Incompleta))
+            {
+                var fichada = empresa.First(f => f.Id == item.Id);
+                if (fichada.Estado == "Incompleto")
+                    continue;
+                fichada.Estado = "Incompleto";
+                fichada.MinutosHastaCorte = item.MinutosHastaCorte;
+                marcadas++;
+                _logger.LogInformation(
+                    "Fichada {FichadaId} del empleado {EmpleadoId} marcada como Incompleto sin inventar salida.",
+                    fichada.Id,
+                    fichada.EmpleadoId);
+            }
         }
 
-        await context.SaveChangesAsync(cancellationToken);
-        return fichadasAbiertas.Count;
+        if (marcadas > 0)
+            await context.SaveChangesAsync(cancellationToken);
+        return marcadas;
     }
 }

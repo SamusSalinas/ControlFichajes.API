@@ -51,7 +51,7 @@ public class CorteMedianocheWorkerTests
         var fichadaActualizada = await context.Fichada.AsNoTracking().FirstOrDefaultAsync(f => f.Id == 1);
         Assert.NotNull(fichadaActualizada);
         Assert.Equal("Incompleto", fichadaActualizada.Estado);
-        Assert.Equal(900, fichadaActualizada.MinutosHastaCorte);
+        Assert.Equal(720, fichadaActualizada.MinutosHastaCorte);
     }
 
     [Fact]

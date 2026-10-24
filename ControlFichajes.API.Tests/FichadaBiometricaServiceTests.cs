@@ -44,9 +44,9 @@ public class FichadaBiometricaServiceTests
         var fichadas = await context.Fichada.OrderBy(f => f.FechaHora).ToListAsync();
         Assert.Null(resultado.Error);
         Assert.Equal(2, resultado.Recibidas);
-        Assert.All(fichadas, f => Assert.Equal("Entrada", f.TipoRegistro));
-        Assert.Equal("Incompleto", fichadas[0].Estado);
-        Assert.Equal(15, fichadas[0].MinutosHastaCorte);
+        Assert.All(fichadas, f => Assert.Equal("SinTipo", f.TipoRegistro));
+        Assert.All(fichadas, f => Assert.Equal("Completada", f.Estado));
+        Assert.All(fichadas, f => Assert.Null(f.MinutosHastaCorte));
         Assert.Equal("Biometrico", fichadas[0].Metodo);
     }
 
@@ -76,7 +76,7 @@ public class FichadaBiometricaServiceTests
         empresaId: 1);
 
         var fichadas = await context.Fichada.OrderBy(f => f.FechaHora).ToListAsync();
-        Assert.Equal(new[] { "Entrada", "Salida" }, fichadas.Select(f => f.TipoRegistro));
+        Assert.Equal(new[] { "SinTipo", "SinTipo" }, fichadas.Select(f => f.TipoRegistro));
         Assert.Equal("Completada", fichadas[0].Estado);
         Assert.Null(fichadas[0].MinutosHastaCorte);
     }
@@ -205,7 +205,7 @@ public class FichadaBiometricaServiceTests
         Assert.Null(resultado.Error);
         Assert.Equal(5, resultado.Recibidas);
         Assert.Equal(
-            new[] { "Entrada", "Salida", "Entrada", "Entrada", "Salida" },
+            new[] { "SinTipo", "SinTipo", "SinTipo", "SinTipo", "SinTipo" },
             fichadas.Select(f => f.TipoRegistro));
         Assert.All(fichadas, f => Assert.Equal("Biometrico", f.Metodo));
     }
@@ -270,7 +270,7 @@ public class FichadaBiometricaServiceTests
 
         var fichadas = await context.Fichada.OrderBy(f => f.EmpleadoId).ThenBy(f => f.FechaHora).ToListAsync();
         Assert.Null(resultado.Error);
-        Assert.Equal(new[] { "Entrada", "Salida", "Entrada", "Salida" }, fichadas.Select(f => f.TipoRegistro));
+        Assert.Equal(new[] { "SinTipo", "SinTipo", "SinTipo", "SinTipo" }, fichadas.Select(f => f.TipoRegistro));
     }
 
     [Fact]
@@ -291,7 +291,7 @@ public class FichadaBiometricaServiceTests
         Assert.Null(resultado.Error);
         Assert.Equal(2, resultado.Recibidas);
         Assert.Single(await context.Fichada.ToListAsync());
-        Assert.Equal("Entrada", (await context.Fichada.SingleAsync()).TipoRegistro);
+        Assert.Equal("SinTipo", (await context.Fichada.SingleAsync()).TipoRegistro);
     }
 
     [Fact]
@@ -315,8 +315,83 @@ public class FichadaBiometricaServiceTests
         Assert.Equal(2, reintento.Recibidas);
         Assert.Equal(2, await context.Fichada.CountAsync());
         Assert.Equal(
-            new[] { "Entrada", "Salida" },
+            new[] { "SinTipo", "SinTipo" },
             (await context.Fichada.OrderBy(f => f.FechaHora).ToListAsync()).Select(f => f.TipoRegistro));
+    }
+
+    [Fact]
+    public void Clave_UtcYHoraArgentinaDelMismoInstanteCoinciden()
+    {
+        var pared = new DateTime(2026, 10, 23, 8, 0, 0);
+        var utc = DateTime.SpecifyKind(pared.AddHours(3), DateTimeKind.Utc);
+
+        Assert.Equal(
+            FichadaBiometricaIdempotencia.Clave(7, pared),
+            FichadaBiometricaIdempotencia.Clave(7, utc));
+        Assert.Equal("b:7:20261023080000000000", FichadaBiometricaIdempotencia.Clave(7, pared));
+    }
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    [InlineData(61)]
+    public async Task RegistrarAsync_TimestampNoExactoSeConservaConOtraClave(int segundos)
+    {
+        await using var context = CrearContexto();
+        context.Empleado.Add(CrearEmpleado(1, empresaId: 1));
+        await context.SaveChangesAsync();
+        var inicio = new DateTime(2026, 10, 23, 8, 0, 0);
+        var service = new FichadaBiometricaService(context);
+
+        await service.RegistrarAsync([CrearSolicitud(1, inicio)], empresaId: 1);
+        var segundo = await service.RegistrarAsync([CrearSolicitud(1, inicio.AddSeconds(segundos))], empresaId: 1);
+
+        var fichadas = await context.Fichada.OrderBy(f => f.FechaHora).ToListAsync();
+        Assert.Null(segundo.Error);
+        Assert.Equal(2, fichadas.Count);
+        Assert.Equal(2, fichadas.Select(f => f.ClaveIdempotencia).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task RegistrarAsync_ManualConElMismoTimestampNoOcupaLaClaveBiometrica()
+    {
+        await using var context = CrearContexto();
+        context.Empleado.Add(CrearEmpleado(1, empresaId: 1));
+        var hora = new DateTime(2026, 10, 23, 8, 0, 0);
+        context.Fichada.Add(new Fichada
+        {
+            EmpleadoId = 1,
+            FechaHora = hora,
+            TipoRegistro = "Entrada",
+            Metodo = "Manual",
+            EsManual = true
+        });
+        await context.SaveChangesAsync();
+
+        var resultado = await new FichadaBiometricaService(context).RegistrarAsync([CrearSolicitud(1, hora)], empresaId: 1);
+
+        var fichadas = await context.Fichada.OrderBy(f => f.Id).ToListAsync();
+        Assert.Null(resultado.Error);
+        Assert.Equal(2, fichadas.Count);
+        Assert.Null(fichadas[0].ClaveIdempotencia);
+        Assert.Equal("Entrada", fichadas[0].TipoRegistro);
+        Assert.Equal(FichadaBiometricaIdempotencia.Clave(1, hora), fichadas[1].ClaveIdempotencia);
+    }
+
+    [Fact]
+    public async Task RegistrarAsync_EmpleadosDistintosNoCompartenClave()
+    {
+        await using var context = CrearContexto();
+        context.Empleado.AddRange(CrearEmpleado(1, 1), CrearEmpleado(2, 1));
+        await context.SaveChangesAsync();
+        var hora = new DateTime(2026, 10, 23, 8, 0, 0);
+
+        await new FichadaBiometricaService(context).RegistrarAsync(
+            [CrearSolicitud(1, hora), CrearSolicitud(2, hora)],
+            empresaId: 1);
+
+        var claves = await context.Fichada.Select(f => f.ClaveIdempotencia).ToListAsync();
+        Assert.Equal(2, claves.Distinct().Count());
     }
 
     private static Empleado CrearEmpleado(int empleadoId, int empresaId, bool activo = true)

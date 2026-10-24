@@ -20,16 +20,13 @@ public class FichadasController : ControllerBase
 
     private readonly AppDbContext _context;
     private readonly FichadaBiometricaService _fichadaBiometricaService;
+    private readonly ILaborClock _clock;
 
-    public FichadasController(AppDbContext context)
-        : this(context, new FichadaBiometricaService(context))
-    {
-    }
-
-    public FichadasController(AppDbContext context, FichadaBiometricaService fichadaBiometricaService)
+    public FichadasController(AppDbContext context, FichadaBiometricaService fichadaBiometricaService, ILaborClock clock)
     {
         _context = context;
         _fichadaBiometricaService = fichadaBiometricaService;
+        _clock = clock;
     }
 
     [HttpGet]
@@ -55,8 +52,6 @@ public class FichadasController : ControllerBase
             query = query.Where(f => f.FechaHora >= desde.Value);
         if (hasta.HasValue)
             query = query.Where(f => f.FechaHora < hasta.Value);
-        if (!string.IsNullOrWhiteSpace(tipo))
-            query = query.Where(f => f.TipoRegistro == tipo);
         if (!string.IsNullOrWhiteSpace(metodo))
             query = query.Where(f => f.Metodo == metodo);
 
@@ -91,7 +86,41 @@ public class FichadasController : ControllerBase
             })
             .ToListAsync();
 
-        return Ok(fichadas);
+        var consulta = new JornadaClasificacionConsulta(_context, _clock);
+        var clasificacion = fichadas.Count == 0
+            ? new Dictionary<int, ClasificacionFichada>()
+            : await consulta.ClasificarEmpresaAsync(
+                empresaIdUsuario,
+                fichadas.Select(f => f.EmpleadoId).Distinct().ToList(),
+                fichadas.Min(f => f.FechaHora),
+                fichadas.Max(f => f.FechaHora));
+        var respuesta = fichadas.Select(f =>
+        {
+            clasificacion.TryGetValue(f.Id, out var clase);
+            return new
+            {
+                f.Id,
+                f.EmpleadoId,
+                f.Nombre,
+                f.Apellido,
+                f.Legajo,
+                f.FechaHora,
+                f.Tipo,
+                f.Metodo,
+                f.EsManual,
+                f.Estado,
+                MinutosHastaCorte = clase?.MinutosHastaCorte ?? f.MinutosHastaCorte,
+                f.observacion,
+                movimientoVisual = clase?.MovimientoVisual,
+                jornadaEstado = clase?.JornadaEstado,
+                jornadaMotivo = clase?.JornadaMotivo,
+                jornadaFecha = clase?.JornadaFecha.ToString("yyyy-MM-dd")
+            };
+        });
+        if (!string.IsNullOrWhiteSpace(tipo))
+            respuesta = respuesta.Where(f => f.movimientoVisual == tipo);
+
+        return Ok(respuesta);
     }
 
     [HttpGet("alertas/incompletas")]
@@ -106,31 +135,41 @@ public class FichadasController : ControllerBase
         if (limite is < 1 or > 500)
             return BadRequest(new { mensaje = "El límite debe estar entre 1 y 500." });
 
-        var inicio = (desde ?? DateTime.Today.AddDays(-7)).Date;
-        var fin = (hasta ?? DateTime.Today).Date.AddDays(1);
+        var ahora = LaborTime.Ahora(_clock);
+        var inicio = (desde ?? ahora.AddDays(-7)).Date;
+        var fin = (hasta ?? ahora).Date.AddDays(1);
         if (fin <= inicio)
             return BadRequest(new { mensaje = "El rango de fechas no es válido." });
 
-        var alertas = await _context.Fichada
+        var fichadas = await _context.Fichada
             .AsNoTracking()
-            .Where(f => f.Estado == "Incompleto" &&
-                        f.TipoRegistro == RegistroTipos.Entrada &&
-                        f.FechaHora >= inicio && f.FechaHora < fin &&
+            .Where(f => f.FechaHora >= inicio.AddDays(-1) && f.FechaHora < fin.AddDays(1) &&
                         f.Empleado != null && f.Empleado.EmpresaId == empresaId)
+            .Select(f => new { f.Id, f.EmpleadoId, f.FechaHora, f.EsManual, nombre = f.Empleado!.Nombre, apellido = f.Empleado.Apellido })
+            .ToListAsync();
+        var consulta = new JornadaClasificacionConsulta(_context, _clock);
+        var clasificacion = fichadas.Count == 0
+            ? new Dictionary<int, ClasificacionFichada>()
+            : await consulta.ClasificarEmpresaAsync(empresaId, fichadas.Select(f => f.EmpleadoId).Distinct().ToList(), inicio, fin);
+        var alertas = fichadas
+            .Where(f => clasificacion.TryGetValue(f.Id, out var clase) &&
+                        clase.JornadaEstado == JornadaClasificador.Incompleta &&
+                        clase.MovimientoVisual == JornadaClasificador.Entrada &&
+                        clase.JornadaFecha >= DateOnly.FromDateTime(inicio) &&
+                        clase.JornadaFecha < DateOnly.FromDateTime(fin))
             .OrderByDescending(f => f.FechaHora)
             .Take(limite)
             .Select(f => new
             {
                 fichadaId = f.Id,
                 f.EmpleadoId,
-                nombre = f.Empleado!.Nombre,
-                apellido = f.Empleado.Apellido,
+                f.nombre,
+                f.apellido,
                 f.FechaHora,
-                f.MinutosHastaCorte,
+                minutosHastaCorte = clasificacion[f.Id].MinutosHastaCorte,
                 f.EsManual,
                 mensaje = "Falta una salida antes del cierre del día."
-            })
-            .ToListAsync();
+            });
 
         return Ok(alertas);
     }
@@ -237,18 +276,59 @@ public class FichadasController : ControllerBase
         if (entrada.Any(f => !tiposValidos.Contains(f.TipoRegistro) || !metodosValidos.Contains(f.Metodo)))
             return BadRequest(new { mensaje = "TipoRegistro o Metodo no válido." });
 
-        var registros = entrada.Select(f => new Fichada
+        var registros = new List<Fichada>(entrada.Count);
+        var claves = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var fichada in entrada)
         {
-            EmpleadoId = f.EmpleadoId,
-            FechaHora = f.FechaHora,
-            TipoRegistro = f.TipoRegistro,
-            Metodo = f.Metodo
-        }).ToList();
+            var biometrica = fichada.Metodo is "Biometrico" or "Biométrico";
+            var fecha = biometrica ? FichadaBiometricaIdempotencia.Normalizar(fichada.FechaHora) : fichada.FechaHora;
+            var clave = biometrica ? FichadaBiometricaIdempotencia.Clave(fichada.EmpleadoId, fecha) : null;
+            if (clave != null && !claves.Add(clave))
+                continue;
+            registros.Add(new Fichada
+            {
+                EmpleadoId = fichada.EmpleadoId,
+                FechaHora = fecha,
+                TipoRegistro = fichada.TipoRegistro,
+                Metodo = fichada.Metodo,
+                ClaveIdempotencia = clave
+            });
+        }
 
-        _context.Fichada.AddRange(registros);
-        await _context.SaveChangesAsync();
+        if (claves.Count > 0)
+        {
+            var ocupadas = await _context.Fichada.AsNoTracking()
+                .Where(f => f.ClaveIdempotencia != null && claves.Contains(f.ClaveIdempotencia))
+                .Select(f => f.ClaveIdempotencia!)
+                .ToListAsync();
+            registros.RemoveAll(f => f.ClaveIdempotencia != null && ocupadas.Contains(f.ClaveIdempotencia));
+        }
 
-        return Ok(new { recibidas = registros.Count });
+        for (var intento = 0; registros.Count > 0 && intento <= registros.Count; intento++)
+        {
+            _context.Fichada.AddRange(registros);
+            try
+            {
+                await _context.SaveChangesAsync();
+                break;
+            }
+            catch (DbUpdateException ex) when (FichadaBiometricaIdempotencia.EsConflictoDeClave(ex))
+            {
+                foreach (var entry in _context.ChangeTracker.Entries<Fichada>().Where(e => e.State == EntityState.Added).ToList())
+                    entry.State = EntityState.Detached;
+                var pendientes = registros.Select(f => f.ClaveIdempotencia).Where(c => c != null).ToList();
+                var confirmadas = await _context.Fichada.AsNoTracking()
+                    .Where(f => f.ClaveIdempotencia != null && pendientes.Contains(f.ClaveIdempotencia))
+                    .Select(f => f.ClaveIdempotencia!)
+                    .ToListAsync();
+                var antes = registros.Count;
+                registros.RemoveAll(f => f.ClaveIdempotencia != null && confirmadas.Contains(f.ClaveIdempotencia));
+                if (registros.Count == antes)
+                    throw;
+            }
+        }
+
+        return Ok(new { recibidas = entrada.Count });
     }
 
     [HttpPost("biometricas/bulk")]

@@ -37,13 +37,21 @@ public sealed class TurnoValidacionRules : ITurnoValidacionRules
             if (!TimeSpan.TryParse(dia.HoraEntrada, CultureInfo.InvariantCulture, out var entrada) ||
                 !TimeSpan.TryParse(dia.HoraSalida, CultureInfo.InvariantCulture, out var salida) ||
                 entrada < TimeSpan.Zero || entrada >= FinDelDia ||
-                salida <= entrada || salida >= FinDelDia ||
-                salida - entrada < DuracionMinima)
+                salida < TimeSpan.Zero || salida >= FinDelDia ||
+                entrada == salida ||
+                Duracion(entrada, salida) < DuracionMinima)
             {
-                return "Cada día requiere horas válidas del mismo día y una duración de al menos 60 minutos.";
+                return "Cada día requiere horas válidas. Una salida anterior a la entrada es un turno nocturno; una salida igual a la entrada no es válida. La duración mínima es 60 minutos.";
             }
         }
 
         return null;
+    }
+
+    private static TimeSpan Duracion(TimeSpan entrada, TimeSpan salida)
+    {
+        if (salida > entrada)
+            return salida - entrada;
+        return TimeSpan.FromDays(1) - entrada + salida;
     }
 }

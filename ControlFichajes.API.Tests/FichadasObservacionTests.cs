@@ -7,6 +7,7 @@ using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Security;
+using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -94,7 +95,7 @@ public class FichadasObservacionTests
             EmpresaAccess.ApplyEmpresaContext(user, headers);
         }
 
-        return new FichadasController(context)
+        return new FichadasController(context, new FichadaBiometricaService(context), new SystemLaborClock())
         {
             ControllerContext = new ControllerContext
             {

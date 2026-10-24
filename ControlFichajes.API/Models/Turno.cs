@@ -1,8 +1,11 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ControlFichajes.API.Models;
 
 public class Turno
 {
     public int Id { get; set; }
+    [MaxLength(100)]
     public string Nombre { get; set; } = string.Empty;
     public int ToleranciaMinutos { get; set; }
     public int EmpresaId { get; set; }

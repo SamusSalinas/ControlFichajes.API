@@ -63,8 +63,10 @@ public class LocalTunnelBiometricAcceptanceTests
             var savedPunches = await GetRunPunchesAsync(context, settings.TestEmployeeId, timestamps);
             Assert.Equal(timestamps.Length, savedPunches.Count);
             Assert.Equal(
-                new[] { "Entrada", "Salida" },
+                new[] { "SinTipo", "SinTipo" },
                 savedPunches.OrderBy(punch => punch.FechaHora).Select(punch => punch.TipoRegistro));
+            // Pendiente en este host: movimientoVisual y jornadaEstado se derivan al leer
+            // y no se persisten. Esta prueba solo fija el tipo original.
             Assert.All(savedPunches, punch => Assert.Equal("Biometrico", punch.Metodo));
         }
         finally

@@ -37,15 +37,14 @@ namespace ControlFichajes.API.Data
             modelBuilder.Entity<EmpleadoJornadaExcepcion>().HasIndex(e => new { e.EmpleadoId, e.Fecha }).IsUnique();
             modelBuilder.Entity<EmpleadoTurno>().HasIndex(e => new { e.EmpleadoId, e.FechaInicio });
             modelBuilder.Entity<ReposicionHoras>().HasIndex(r => new { r.EmpleadoId, r.Fecha });
+            modelBuilder.Entity<Fichada>()
+                .HasIndex(f => f.ClaveIdempotencia)
+                .IsUnique()
+                .HasDatabaseName("UX_Fichada_ClaveIdempotencia");
             modelBuilder.Entity<Turno>()
                 .HasOne(t => t.Empresa)
                 .WithMany()
                 .HasForeignKey(t => t.EmpresaId)
-                .OnDelete(DeleteBehavior.Restrict);
-            modelBuilder.Entity<Empleado>()
-                .HasOne(e => e.TurnoActual)
-                .WithMany()
-                .HasForeignKey(e => e.TurnoId)
                 .OnDelete(DeleteBehavior.Restrict);
             modelBuilder.Entity<TurnoDia>()
                 .HasOne(d => d.Turno)

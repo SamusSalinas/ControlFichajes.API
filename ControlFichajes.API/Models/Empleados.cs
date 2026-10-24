@@ -45,11 +45,12 @@ namespace ControlFichajes.API.Models
         [ForeignKey(nameof(SucursalId))]
         public virtual Sucursal? SucursalEntidad { get; set; }
 
-        public int? TurnoId { get; set; }
-
-        [ForeignKey(nameof(TurnoId))]
-        public virtual Turno? TurnoActual { get; set; }
-
+        /// <summary>
+        /// Horario legado "HH:mm-HH:mm". No es la fuente vigente: para una fecha manda
+        /// la asignación de EmpleadoTurno y, si existe, la excepción de ese día.
+        /// No hay TurnoId en el empleado: era una copia redundante y la columna no
+        /// forma parte del esquema que esta API puede asumir.
+        /// </summary>
         [MaxLength(50)]
         public string? Horario { get; set; }
 

@@ -111,8 +111,16 @@ namespace ControlFichajes.API.Controllers
             if (departamentoDb.Sucursal == null || !EmpresaAccess.PerteneceAUsuario(User, departamentoDb.Sucursal.EmpresaId))
                 return Forbid();
 
-            departamentoDb.Nombre = request.Nombre;
-            departamentoDb.SucursalId = request.SucursalId;
+            var nombre = request.Nombre?.Trim() ?? string.Empty;
+            if (nombre.Length == 0 || nombre.Length > 100)
+                return BadRequest(new { mensaje = "El nombre del departamento es obligatorio y no puede superar 100 caracteres." });
+
+            var duplicado = await _context.Departamento.AnyAsync(d =>
+                d.Id != id && d.SucursalId == departamentoDb.SucursalId && d.Nombre == nombre);
+            if (duplicado)
+                return Conflict(new { mensaje = "Ya existe un departamento con ese nombre en esa sucursal." });
+
+            departamentoDb.Nombre = nombre;
 
             await _context.SaveChangesAsync();
             return NoContent();
@@ -132,8 +140,35 @@ namespace ControlFichajes.API.Controllers
             if (departamento.Sucursal == null || !EmpresaAccess.PerteneceAUsuario(User, departamento.Sucursal.EmpresaId))
                 return Forbid();
 
+            var asignados = await _context.Empleado.CountAsync(e => e.DepartamentoId == id);
+            if (asignados > 0)
+            {
+                return Conflict(new
+                {
+                    mensaje = $"No se puede eliminar el departamento porque tiene {asignados} empleados asignados. Reasigná esos empleados antes de eliminarlo.",
+                    cantidadEmpleados = asignados
+                });
+            }
+
             _context.Departamento.Remove(departamento);
-            await _context.SaveChangesAsync();
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                foreach (var entry in _context.ChangeTracker.Entries())
+                {
+                    if (entry.State == EntityState.Deleted)
+                        entry.State = EntityState.Unchanged;
+                }
+
+                return Conflict(new
+                {
+                    mensaje = "No se puede eliminar el departamento porque tiene empleados asignados. Reasigná esos empleados antes de eliminarlo.",
+                    cantidadEmpleados = await _context.Empleado.CountAsync(e => e.DepartamentoId == id)
+                });
+            }
 
             return NoContent();
         }

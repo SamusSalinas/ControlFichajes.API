@@ -87,6 +87,10 @@ public class TurnoService : ITurnoService
 
         if (turno == null) return (false, "Turno no encontrado.");
 
+        var asignado = await _context.EmpleadoTurno.AnyAsync(a => a.TurnoId == id);
+        if (asignado)
+            return (false, "No se puede eliminar el turno porque tiene asignaciones de empleados.");
+
         turno.Activo = false;
         await _context.SaveChangesAsync();
         return (true, null);

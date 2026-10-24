@@ -76,25 +76,6 @@ namespace ControlFichajes.API.Controllers
                 Fichada = nuevaFichada
             };
 
-            if (request.Tipo == RegistroTipos.Salida)
-            {
-                var diaInicio = request.FechaHora.Date;
-                var entradaAbierta = await _context.Fichada
-                    .Where(f => f.EmpleadoId == request.EmpleadoId &&
-                                f.TipoRegistro == RegistroTipos.Entrada &&
-                                f.FechaHora >= diaInicio &&
-                                f.FechaHora < diaInicio.AddDays(1) &&
-                                f.FechaHora < request.FechaHora &&
-                                f.Estado == "Incompleto")
-                    .OrderByDescending(f => f.FechaHora)
-                    .FirstOrDefaultAsync();
-                if (entradaAbierta != null)
-                {
-                    entradaAbierta.Estado = "Completada";
-                    entradaAbierta.MinutosHastaCorte = null;
-                }
-            }
-
             _context.Fichada.Add(nuevaFichada);
             _context.FichadaObservacion.Add(observacion);
             

@@ -65,6 +65,7 @@ public class ResumenHorasDiaDto
 {
     public DateTime Fecha { get; set; }
     public int MinutosProgramados { get; set; }
+    public int ActividadRegistrada { get; set; }
     public int MinutosTrabajados { get; set; }
     public int MinutosTarde { get; set; }
     public int MinutosSaldo { get; set; }
@@ -77,6 +78,7 @@ public class ResumenHorasDto
     public DateTime Desde { get; set; }
     public DateTime Hasta { get; set; }
     public int MinutosProgramados { get; set; }
+    public int ActividadRegistrada { get; set; }
     public int MinutosTrabajados { get; set; }
     public int MinutosRepuestos { get; set; }
     public int SaldoMinutos { get; set; }
