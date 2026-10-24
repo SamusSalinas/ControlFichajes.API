@@ -81,6 +81,7 @@ public class JornadaServiceTests
 
         Assert.NotNull(resumen);
         Assert.Equal(480, resumen.MinutosProgramados);
+        Assert.Equal(530, resumen.ActividadRegistrada);
         Assert.Equal(470, resumen.MinutosTrabajados);
         Assert.Equal(5, resumen.Dias.Single().MinutosTarde);
         Assert.Equal(30, resumen.MinutosRepuestos);
@@ -164,8 +165,7 @@ public class JornadaServiceTests
         Assert.Equal(fechaCambio.AddDays(-1), historial[0].FechaFin);
         Assert.Equal(fechaCambio, historial[1].FechaInicio);
         Assert.Null(historial[1].FechaFin);
-        var empleadoActual = await context.Empleado.FindAsync(1);
-        Assert.Equal(2, empleadoActual!.TurnoId);
+        Assert.Equal(2, historial[1].TurnoId);
     }
 
     [Fact]
@@ -187,5 +187,125 @@ public class JornadaServiceTests
         Assert.True(calendario[0].TieneTurnoAsignado);
         Assert.False(calendario[0].TieneHorarioConfigurado);
         Assert.False(calendario[0].EsDiaLibre);
+    }
+
+    [Fact]
+    public async Task Resumen_JornadaExactaDescuentaAlmuerzoUnaVezYSaldoCero()
+    {
+        var fecha = new DateTime(2026, 10, 22);
+        var resumen = await ResumenDe(fecha, new TimeSpan(8, 0, 0), new TimeSpan(17, 0, 0), 60, null,
+            fecha.AddHours(8), fecha.AddHours(17));
+
+        Assert.Equal(540, resumen.ActividadRegistrada);
+        Assert.Equal(480, resumen.MinutosProgramados);
+        Assert.Equal(480, resumen.MinutosTrabajados);
+        Assert.Equal(0, resumen.SaldoMinutos);
+    }
+
+    [Fact]
+    public async Task Resumen_LlegadaTardeDescuentaAlmuerzoSobrePrimeraYUltima()
+    {
+        var fecha = new DateTime(2026, 10, 22);
+        var resumen = await ResumenDe(fecha, new TimeSpan(8, 0, 0), new TimeSpan(17, 0, 0), 60, null,
+            fecha.AddHours(9).AddMinutes(10), fecha.AddHours(18));
+
+        Assert.Equal(530, resumen.ActividadRegistrada);
+        Assert.Equal(480, resumen.MinutosProgramados);
+        Assert.Equal(470, resumen.MinutosTrabajados);
+        Assert.Equal(-10, resumen.SaldoMinutos);
+    }
+
+    [Fact]
+    public async Task Resumen_ReposicionSeSumaAlSaldoNeto()
+    {
+        var fecha = new DateTime(2026, 10, 22);
+        var resumen = await ResumenDe(fecha, new TimeSpan(8, 0, 0), new TimeSpan(17, 0, 0), 60, 30,
+            fecha.AddHours(9).AddMinutes(10), fecha.AddHours(18));
+
+        Assert.Equal(470, resumen.MinutosTrabajados);
+        Assert.Equal(30, resumen.MinutosRepuestos);
+        Assert.Equal(20, resumen.SaldoMinutos);
+    }
+
+    [Fact]
+    public async Task Resumen_PresenciaMenorAlAlmuerzoNoDevuelveMinutosNegativos()
+    {
+        var fecha = new DateTime(2026, 10, 22);
+        var resumen = await ResumenDe(fecha, new TimeSpan(8, 0, 0), new TimeSpan(17, 0, 0), 60, null,
+            fecha.AddHours(8), fecha.AddHours(8).AddMinutes(20));
+
+        Assert.Equal(20, resumen.ActividadRegistrada);
+        Assert.Equal(0, resumen.MinutosTrabajados);
+        Assert.True(resumen.MinutosTrabajados >= 0);
+        Assert.True(resumen.MinutosProgramados >= 0);
+    }
+
+    [Fact]
+    public async Task Resumen_TurnoNocturnoCompletoQuedaEnCero()
+    {
+        var fecha = new DateTime(2026, 10, 21);
+        var resumen = await ResumenDe(fecha, new TimeSpan(22, 0, 0), new TimeSpan(6, 0, 0), 60, null,
+            fecha.AddHours(22), fecha.AddDays(1).AddHours(6));
+
+        Assert.Equal(480, resumen.ActividadRegistrada);
+        Assert.Equal(420, resumen.MinutosProgramados);
+        Assert.Equal(420, resumen.MinutosTrabajados);
+        Assert.Equal(0, resumen.SaldoMinutos);
+    }
+
+    private static async Task<ResumenHorasDto> ResumenDe(
+        DateTime fecha,
+        TimeSpan entrada,
+        TimeSpan salida,
+        int almuerzo,
+        int? reposicion,
+        params DateTime[] fichadas)
+    {
+        using var context = CrearContexto();
+        var turno = new Turno
+        {
+            Id = 1,
+            EmpresaId = 1,
+            Nombre = "Horario",
+            ToleranciaMinutos = 0,
+            Activo = true,
+            Dias =
+            [
+                new TurnoDia
+                {
+                    DiaSemana = (int)fecha.DayOfWeek,
+                    HoraEntrada = entrada,
+                    HoraSalida = salida,
+                    MinutosAlmuerzo = almuerzo
+                }
+            ]
+        };
+        context.Empleado.Add(CrearEmpleado());
+        context.Turno.Add(turno);
+        context.EmpleadoTurno.Add(new EmpleadoTurno { EmpleadoId = 1, Turno = turno, FechaInicio = fecha });
+        context.Fichada.AddRange(fichadas.Select((hora, indice) => new Fichada
+        {
+            Id = indice + 1,
+            EmpleadoId = 1,
+            FechaHora = hora,
+            TipoRegistro = "SinTipo"
+        }));
+        if (reposicion.HasValue)
+        {
+            context.ReposicionHoras.Add(new ReposicionHoras
+            {
+                EmpleadoId = 1,
+                Fecha = fecha,
+                Minutos = reposicion.Value,
+                Detalle = "Reposición",
+                CreadoPorNombre = "Admin",
+                CreadoEn = DateTime.UtcNow
+            });
+        }
+
+        await context.SaveChangesAsync();
+        var resumen = await new JornadaService(context).ObtenerResumenAsync(1, 1, fecha, fecha);
+        Assert.NotNull(resumen);
+        return resumen;
     }
 }

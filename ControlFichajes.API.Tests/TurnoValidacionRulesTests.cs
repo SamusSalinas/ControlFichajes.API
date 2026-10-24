@@ -55,7 +55,7 @@ public class TurnoValidacionRulesTests
 
     [Theory]
     [InlineData("08:00", "08:59")]
-    [InlineData("18:00", "08:00")]
+    [InlineData("08:00", "08:00")]
     [InlineData("invalid", "17:00")]
     [InlineData("08:00", "24:00")]
     public void Validar_HorarioInvalido_RetornaError(string entrada, string salida)

@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Claims;
 using ControlFichajes.API.Controllers;
+using ControlFichajes.API.Services;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
@@ -81,7 +82,37 @@ public class FichadaBiometricaControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(1, ok.Value!.GetType().GetProperty("recibidas")!.GetValue(ok.Value));
-        Assert.Equal("Entrada", (await context.Fichada.SingleAsync()).TipoRegistro);
+        Assert.Equal("SinTipo", (await context.Fichada.SingleAsync()).TipoRegistro);
+    }
+
+    [Fact]
+    public async Task PostBulk_BiometricoRepetidoConservaUnaFilaYSuTipo()
+    {
+        await using var context = CreateContext();
+        context.Empleado.Add(new Empleado
+        {
+            Id = 1,
+            EmpresaId = 1,
+            DNI = "TEST-1",
+            CUIL = "TEST-CUIL-1",
+            Nombre = "Ada",
+            Apellido = "Lovelace",
+            Activo = true
+        });
+        await context.SaveChangesAsync();
+        var controller = CreateController(context, CrearPrincipal(empresaId: 1));
+        var hora = new DateTime(2026, 10, 13, 9, 0, 0);
+        var lote = new[]
+        {
+            new Fichada { EmpleadoId = 1, FechaHora = hora, TipoRegistro = "Entrada", Metodo = "Biometrico" }
+        };
+
+        Assert.IsType<OkObjectResult>(await controller.PostBulk(lote));
+        Assert.IsType<OkObjectResult>(await controller.PostBulk(lote));
+
+        var guardada = await context.Fichada.SingleAsync();
+        Assert.Equal("Entrada", guardada.TipoRegistro);
+        Assert.Equal(FichadaBiometricaIdempotencia.Clave(1, hora), guardada.ClaveIdempotencia);
     }
 
     [Fact]
@@ -104,7 +135,7 @@ public class FichadaBiometricaControllerTests
 
     private static FichadasController CreateController(AppDbContext context, ClaimsPrincipal user)
     {
-        return new FichadasController(context)
+        return new FichadasController(context, new FichadaBiometricaService(context), new SystemLaborClock())
         {
             ControllerContext = new ControllerContext
             {

@@ -64,7 +64,6 @@ public class JornadaService
             {
                 anterior.TurnoId = dto.TurnoId;
                 anterior.FechaFin = fin;
-                empleado.TurnoId = dto.TurnoId;
                 await _context.SaveChangesAsync();
                 return await ObtenerAsignacionPorIdAsync(anterior.Id);
             }
@@ -88,7 +87,6 @@ public class JornadaService
             FechaInicio = inicio,
             FechaFin = fin
         };
-        empleado.TurnoId = dto.TurnoId;
         _context.EmpleadoTurno.Add(asignacion);
         await _context.SaveChangesAsync();
         return await ObtenerAsignacionPorIdAsync(asignacion.Id);
@@ -118,6 +116,12 @@ public class JornadaService
             .AsNoTracking()
             .Where(e => e.EmpleadoId == empleadoId && e.Fecha >= inicio && e.Fecha <= fin)
             .ToDictionaryAsync(e => e.Fecha.Date);
+        var horarioLegado = await _context.Empleado
+            .AsNoTracking()
+            .Where(e => e.Id == empleadoId && e.EmpresaId == empresaId)
+            .Select(e => e.Horario)
+            .FirstOrDefaultAsync();
+        HorarioLaboral.TryParseLegado(horarioLegado, out var legado);
 
         var resultado = new List<JornadaDiaDto>();
         for (var fecha = inicio; fecha <= fin; fecha = fecha.AddDays(1))
@@ -137,7 +141,9 @@ public class JornadaService
 
             if (asignacion == null)
             {
-                resultado.Add(new JornadaDiaDto { Fecha = fecha });
+                resultado.Add(legado.Entrada == legado.Salida
+                    ? new JornadaDiaDto { Fecha = fecha }
+                    : MapearPrevisto(fecha, legado, tieneTurno: false));
                 continue;
             }
 
@@ -149,7 +155,7 @@ public class JornadaService
 
             var diaTurno = asignacion.Turno.Dias.FirstOrDefault(d => d.DiaSemana == (int)fecha.DayOfWeek);
             resultado.Add(diaTurno == null
-                ? new JornadaDiaDto { Fecha = fecha, TieneTurnoAsignado = true, TieneHorarioConfigurado = true, EsDiaLibre = true }
+                ? new JornadaDiaDto { Fecha = fecha, TieneTurnoAsignado = true, TieneHorarioConfigurado = false, EsDiaLibre = false }
                 : MapearDiaTurno(fecha, diaTurno, asignacion.Turno.ToleranciaMinutos));
         }
 
@@ -271,14 +277,20 @@ public class JornadaService
         var finExclusivo = hasta.Date.AddDays(1);
         var fichadas = await _context.Fichada
             .AsNoTracking()
-            .Where(f => f.EmpleadoId == empleadoId && f.FechaHora >= inicio && f.FechaHora < finExclusivo)
+            .Where(f => f.EmpleadoId == empleadoId && f.FechaHora >= inicio.AddDays(-1) && f.FechaHora < finExclusivo.AddDays(1))
             .OrderBy(f => f.FechaHora)
             .ToListAsync();
         var reposiciones = await _context.ReposicionHoras
             .AsNoTracking()
             .Where(r => r.EmpleadoId == empleadoId && r.Fecha >= inicio && r.Fecha < finExclusivo)
             .SumAsync(r => (int?)r.Minutos) ?? 0;
-        var fichadasPorDia = fichadas.GroupBy(f => f.FechaHora.Date).ToDictionary(g => g.Key, g => g.ToList());
+        var consulta = new JornadaClasificacionConsulta(_context);
+        var horario = await consulta.CargarHorariosAsync(empresaId, [empleadoId], inicio.AddDays(-1), finExclusivo);
+        var clasificacion = JornadaClasificador.Clasificar(
+            fichadas.Select(f => new FichadaParaClasificar(f.Id, f.EmpleadoId, empresaId, f.FechaHora, f.EsManual)).ToList(),
+            consulta.Ahora(),
+            horario);
+        var fechas = fichadas.ToDictionary(f => f.Id, f => f.FechaHora);
         var resumen = new ResumenHorasDto
         {
             EmpleadoId = empleadoId,
@@ -288,13 +300,16 @@ public class JornadaService
 
         foreach (var jornada in calendario)
         {
-            fichadasPorDia.TryGetValue(jornada.Fecha.Date, out var eventos);
-            var (trabajados, incompleta) = CalcularMinutosTrabajados(eventos ?? []);
-            var minutosTarde = CalcularMinutosTarde(jornada, eventos ?? []);
+            var delDia = clasificacion.Where(c => c.JornadaFecha == DateOnly.FromDateTime(jornada.Fecha)).ToList();
+            var actividad = JornadaClasificador.MinutosActividad(delDia, fechas);
+            var trabajados = JornadaClasificador.MinutosTrabajados(delDia, fechas, jornada.MinutosAlmuerzo);
+            var incompleta = delDia.Any(c => c.JornadaEstado == JornadaClasificador.Incompleta);
+            var minutosTarde = CalcularMinutosTarde(jornada, delDia, fechas);
             var dia = new ResumenHorasDiaDto
             {
                 Fecha = jornada.Fecha,
                 MinutosProgramados = jornada.MinutosProgramados,
+                ActividadRegistrada = actividad,
                 MinutosTrabajados = trabajados,
                 MinutosTarde = minutosTarde,
                 MinutosSaldo = trabajados - jornada.MinutosProgramados,
@@ -302,6 +317,7 @@ public class JornadaService
             };
             resumen.Dias.Add(dia);
             resumen.MinutosProgramados += dia.MinutosProgramados;
+            resumen.ActividadRegistrada += dia.ActividadRegistrada;
             resumen.MinutosTrabajados += dia.MinutosTrabajados;
         }
 
@@ -346,10 +362,26 @@ public class JornadaService
             TieneHorarioConfigurado = true,
             EsDiaLibre = false,
             ToleranciaMinutos = tolerancia,
-            MinutosAlmuerzo = 60,
+            MinutosAlmuerzo = dia.MinutosAlmuerzo,
             HoraEntrada = FormatearHora(dia.HoraEntrada),
             HoraSalida = FormatearHora(dia.HoraSalida),
-            MinutosProgramados = Math.Max(0, (int)(dia.HoraSalida - dia.HoraEntrada).TotalMinutes - 60)
+            MinutosProgramados = JornadaClasificador.MinutosProgramados(dia.HoraEntrada, dia.HoraSalida, dia.MinutosAlmuerzo)
+        };
+    }
+
+    private static JornadaDiaDto MapearPrevisto(DateTime fecha, HorarioPrevisto previsto, bool tieneTurno)
+    {
+        return new JornadaDiaDto
+        {
+            Fecha = fecha,
+            TieneTurnoAsignado = tieneTurno,
+            TieneHorarioConfigurado = true,
+            EsDiaLibre = false,
+            ToleranciaMinutos = previsto.ToleranciaMinutos,
+            MinutosAlmuerzo = previsto.MinutosAlmuerzo,
+            HoraEntrada = FormatearHora(previsto.Entrada),
+            HoraSalida = FormatearHora(previsto.Salida),
+            MinutosProgramados = JornadaClasificador.MinutosProgramados(previsto.Entrada, previsto.Salida, previsto.MinutosAlmuerzo)
         };
     }
 
@@ -378,7 +410,7 @@ public class JornadaService
             MinutosAlmuerzo = 60,
             HoraEntrada = FormatearHora(entrada),
             HoraSalida = FormatearHora(salida),
-            MinutosProgramados = Math.Max(0, (int)(salida - entrada).TotalMinutes - 60)
+            MinutosProgramados = JornadaClasificador.MinutosProgramados(entrada, salida, 60)
         };
     }
 
@@ -404,8 +436,9 @@ public class JornadaService
 
         if (!TryParseHora(dto.HoraEntrada, out var entrada) ||
             !TryParseHora(dto.HoraSalida, out var salida) ||
-            salida - entrada < TimeSpan.FromMinutes(60))
-            throw new ArgumentException("El horario debe ser válido, durar al menos una hora y terminar el mismo día.");
+            entrada == salida ||
+            JornadaClasificador.MinutosProgramados(entrada, salida, 0) < 60)
+            throw new ArgumentException("El horario debe ser válido y durar al menos una hora. Una salida anterior a la entrada se interpreta como turno nocturno.");
 
         return new EmpleadoJornadaExcepcion
         {
@@ -418,49 +451,22 @@ public class JornadaService
         };
     }
 
-    private static (int Minutos, bool Incompleta) CalcularMinutosTrabajados(IReadOnlyList<Fichada> fichadas)
-    {
-        var minutos = 0;
-        Fichada? entradaPendiente = null;
-        var incompleta = fichadas.Any(f => f.Estado == "Incompleto");
-        foreach (var fichada in fichadas)
-        {
-            if (fichada.TipoRegistro == "Entrada")
-            {
-                if (entradaPendiente == null)
-                    entradaPendiente = fichada;
-                else
-                    incompleta = true;
-            }
-            else if (fichada.TipoRegistro == "Salida" && entradaPendiente != null && fichada.FechaHora > entradaPendiente.FechaHora)
-            {
-                minutos += (int)(fichada.FechaHora - entradaPendiente.FechaHora).TotalMinutes;
-                entradaPendiente = null;
-            }
-        }
-
-        if (entradaPendiente != null)
-        {
-            minutos += entradaPendiente.MinutosHastaCorte ?? 0;
-            incompleta = true;
-        }
-
-        return (minutos, incompleta);
-    }
-
-    private static int CalcularMinutosTarde(JornadaDiaDto jornada, IReadOnlyList<Fichada> fichadas)
+    private static int CalcularMinutosTarde(
+        JornadaDiaDto jornada,
+        IReadOnlyList<ClasificacionFichada> clasificacion,
+        IReadOnlyDictionary<int, DateTime> fechas)
     {
         if (jornada.EsDiaLibre || string.IsNullOrWhiteSpace(jornada.HoraEntrada))
             return 0;
-        var primeraEntrada = fichadas
-            .Where(f => f.TipoRegistro == "Entrada")
-            .Select(f => (DateTime?)f.FechaHora)
-            .Min();
-        if (!primeraEntrada.HasValue)
+        var entrada = clasificacion
+            .Where(c => !c.EsDuplicado && c.MovimientoVisual == JornadaClasificador.Entrada)
+            .Select(c => fechas.TryGetValue(c.Id, out var fecha) ? LaborTime.Pared(fecha) : (DateTime?)null)
+            .FirstOrDefault(f => f.HasValue);
+        if (!entrada.HasValue)
             return 0;
         var horaEsperada = jornada.Fecha.Date.Add(TimeSpan.Parse(jornada.HoraEntrada));
         var tolerancia = TimeSpan.FromMinutes(jornada.ToleranciaMinutos);
-        return Math.Max(0, (int)(primeraEntrada.Value - horaEsperada - tolerancia).TotalMinutes);
+        return Math.Max(0, (int)(entrada.Value - horaEsperada - tolerancia).TotalMinutes);
     }
 
     private static ReposicionHorasDto MapearReposicion(ReposicionHoras reposicion)

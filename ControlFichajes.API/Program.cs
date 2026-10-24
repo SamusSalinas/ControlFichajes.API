@@ -56,7 +56,9 @@ builder.Services.AddScoped<ITurnoValidacionRules, TurnoValidacionRules>();
 builder.Services.AddScoped<ITurnoService, TurnoService>();
 builder.Services.AddScoped<JornadaService>();
 builder.Services.AddScoped<FichadaBiometricaService>();
-builder.Services.AddHostedService<CorteMedianocheWorker>();
+builder.Services.AddSingleton<ILaborClock, SystemLaborClock>();
+if (CorteMedianocheConfig.EstaHabilitado(builder.Configuration))
+    builder.Services.AddHostedService<CorteMedianocheWorker>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

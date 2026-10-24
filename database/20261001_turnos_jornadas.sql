@@ -1,10 +1,8 @@
 -- ControlFichajes.API - turnos, jornadas y marca de fichada manual
 -- MySQL 8.0+
 -- Repetible: crea los objetos si faltan y conserva columnas heredadas.
--- Ejecutar con respaldo previo. Este archivo no fue aplicado al servidor durante
--- esta revisión; seleccionar tesis_db explícitamente antes de ejecutarlo.
-
-USE `tesis_db`;
+-- Ejecutar con respaldo previo. La sesión ya debe tener seleccionada la base
+-- de destino. Este archivo no elige un nombre de base.
 
 CREATE TABLE IF NOT EXISTS `Turno` (
     `Id` int NOT NULL AUTO_INCREMENT,
@@ -41,9 +39,9 @@ CREATE TABLE IF NOT EXISTS `EmpleadoTurno` (
     KEY `IX_EmpleadoTurno_EmpleadoId` (`EmpleadoId`),
     KEY `IX_EmpleadoTurno_TurnoId` (`TurnoId`),
     CONSTRAINT `FK_EmpleadoTurno_Empleado_EmpleadoId`
-        FOREIGN KEY (`EmpleadoId`) REFERENCES `Empleado` (`Id`),
+        FOREIGN KEY (`EmpleadoId`) REFERENCES `Empleado` (`Id`) ON DELETE CASCADE,
     CONSTRAINT `FK_EmpleadoTurno_Turno_TurnoId`
-        FOREIGN KEY (`TurnoId`) REFERENCES `Turno` (`Id`)
+        FOREIGN KEY (`TurnoId`) REFERENCES `Turno` (`Id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET @ddl = IF(
@@ -60,26 +58,36 @@ PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
-UPDATE `TurnoDia`
-SET `MinutosAlmuerzo` = 60
-WHERE `Id` > 0
-    AND `MinutosAlmuerzo` <> 60;
+-- No se reescribe MinutosAlmuerzo: el default 60 cubre filas nuevas y una
+-- segunda ejecución no debe pisar un almuerzo ya configurado.
 
--- Los datos previos guardaban solo Empleado.TurnoId, sin fecha histórica.
--- Migrar únicamente las asignaciones actuales que aún no tengan una fila
--- vigente, usando la fecha de corte de esta migración y sin inventar pasado.
--- No se generan filas TurnoDia automáticamente: la tabla está vacía en la
--- instalación revisada y no hay información que permita inferir días laborables.
-INSERT INTO `EmpleadoTurno` (`EmpleadoId`, `TurnoId`, `FechaInicio`, `FechaFin`)
-SELECT e.`Id`, e.`TurnoId`, CURRENT_DATE(), NULL
-FROM `Empleado` e
-WHERE e.`TurnoId` IS NOT NULL
-    AND NOT EXISTS (
+-- Los datos previos podían guardar Empleado.TurnoId, sin fecha histórica.
+-- Esta API no exige esa columna. Si existe, se copia la asignación abierta
+-- que todavía no tenga fila vigente. Si no existe, no se inventa nada.
+SET @empleado_turno_id_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'Empleado'
+      AND COLUMN_NAME = 'TurnoId'
+);
+SET @ddl = IF(
+    @empleado_turno_id_exists = 0,
+    'SELECT 1',
+    'INSERT INTO `EmpleadoTurno` (`EmpleadoId`, `TurnoId`, `FechaInicio`, `FechaFin`)
+     SELECT e.`Id`, e.`TurnoId`, CURRENT_DATE(), NULL
+     FROM `Empleado` e
+     WHERE e.`TurnoId` IS NOT NULL
+       AND NOT EXISTS (
             SELECT 1
             FROM `EmpleadoTurno` et
             WHERE et.`EmpleadoId` = e.`Id`
-                AND et.`FechaFin` IS NULL
-    );
+              AND et.`FechaFin` IS NULL
+       )'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS `EmpleadoJornadaExcepcion` (
     `Id` int NOT NULL AUTO_INCREMENT,

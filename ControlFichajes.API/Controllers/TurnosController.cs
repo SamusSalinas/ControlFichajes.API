@@ -84,7 +84,12 @@ public class TurnosController : ControllerBase
         if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || empresaId <= 0)
             return Forbid();
 
+        if (!User.IsInRole(AppRoles.SuperAdmin) && !User.IsInRole(AppRoles.Admin))
+            return Forbid();
+
         var resultado = await _turnoService.EliminarAsync(id, empresaId);
+        if (!resultado.Exito && resultado.Error?.Contains("asignaciones", StringComparison.Ordinal) == true)
+            return Conflict(new { mensaje = resultado.Error });
         if (!resultado.Exito)
             return NotFound();
 
