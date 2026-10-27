@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ControlFichajes.API.Data;
 using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
@@ -191,5 +192,178 @@ public class TurnoServiceTests
         Assert.False(resultado.Exito);
         Assert.Equal("Turno no encontrado.", resultado.Error);
         Assert.True((await context.Turno.FindAsync(1))!.Activo);
+    }
+
+    [Fact]
+    public async Task CrearAsync_PersisteDescansoCeroYTurnoNocturno()
+    {
+        using var context = CreateContext();
+        var service = new TurnoService(context, new TurnoValidacionRules());
+        var dto = new TurnoCrearDto
+        {
+            Nombre = "Noche",
+            ToleranciaMinutos = 10,
+            Dias =
+            [
+                new() { DiaSemana = 1, HoraEntrada = "22:00", HoraSalida = "06:00", MinutosAlmuerzo = 0 }
+            ]
+        };
+
+        var resultado = await service.CrearAsync(1, dto);
+
+        Assert.Null(resultado.Error);
+        Assert.Equal(0, resultado.Turno!.Dias.Single().MinutosAlmuerzo);
+        Assert.Equal(new TimeSpan(22, 0, 0), (await context.TurnoDia.SingleAsync()).HoraEntrada);
+        Assert.Equal(new TimeSpan(6, 0, 0), (await context.TurnoDia.SingleAsync()).HoraSalida);
+    }
+
+    [Fact]
+    public async Task CrearAsync_RechazaDescansoIgualAlTramo()
+    {
+        using var context = CreateContext();
+        var service = new TurnoService(context, new TurnoValidacionRules());
+        var dto = new TurnoCrearDto
+        {
+            Nombre = "Corto",
+            ToleranciaMinutos = 0,
+            Dias =
+            [
+                new() { DiaSemana = 1, HoraEntrada = "08:00", HoraSalida = "17:00", MinutosAlmuerzo = 540 }
+            ]
+        };
+
+        var resultado = await service.CrearAsync(1, dto);
+
+        Assert.Null(resultado.Turno);
+        Assert.Contains("duración del tramo", resultado.Error);
+        Assert.Empty(context.Turno);
+    }
+
+    [Fact]
+    public async Task ObtenerPorEmpresaAsync_CuentaAsignacionesVigentesSinDuplicar()
+    {
+        using var context = CreateContext();
+        var hoy = new DateTime(2026, 10, 27);
+        var turno = new Turno { Id = 1, EmpresaId = 1, Nombre = "Semanal", Activo = true };
+        var otroTurno = new Turno { Id = 2, EmpresaId = 2, Nombre = "Ajeno", Activo = true };
+        var activo = Empleado(1, 1, true);
+        var inactivo = Empleado(2, 1, false);
+        var ajeno = Empleado(3, 2, true);
+        var futuro = Empleado(5, 1, true);
+        var vencido = Empleado(6, 1, true);
+        context.Turno.AddRange(turno, otroTurno);
+        context.Empleado.AddRange(activo, inactivo, ajeno, futuro, vencido);
+        context.EmpleadoTurno.AddRange(
+            new EmpleadoTurno { EmpleadoId = 1, TurnoId = 1, FechaInicio = hoy.AddDays(-10) },
+            new EmpleadoTurno { EmpleadoId = 1, TurnoId = 1, FechaInicio = hoy.AddDays(-3) },
+            new EmpleadoTurno { EmpleadoId = 2, TurnoId = 1, FechaInicio = hoy.AddDays(-10) },
+            new EmpleadoTurno { EmpleadoId = 5, TurnoId = 1, FechaInicio = hoy.AddDays(1) },
+            new EmpleadoTurno { EmpleadoId = 3, TurnoId = 2, FechaInicio = hoy.AddDays(-10) },
+            new EmpleadoTurno
+            {
+                EmpleadoId = 6,
+                TurnoId = 1,
+                FechaInicio = hoy.AddMonths(-2),
+                FechaFin = hoy.AddDays(-1)
+            });
+        await context.SaveChangesAsync();
+
+        var service = new TurnoService(context, new Mock<ITurnoValidacionRules>().Object);
+        var turnos = (await service.ObtenerPorEmpresaAsync(1, hoy)).ToList();
+
+        Assert.Single(turnos);
+        Assert.Equal(1, turnos[0].CantidadEmpleadosAsignados);
+    }
+
+    [Fact]
+    public async Task ObtenerEmpleadosAsync_FiltraVigenciaEmpresaYNoExponeNavegaciones()
+    {
+        using var context = CreateContext();
+        var hoy = new DateTime(2026, 10, 27);
+        context.Turno.Add(new Turno { Id = 7, EmpresaId = 1, Nombre = "Mañana", Activo = true });
+        context.Empleado.Add(Empleado(4, 1, true, "Ana", "Gómez", "A-4"));
+        context.EmpleadoTurno.Add(new EmpleadoTurno
+        {
+            EmpleadoId = 4,
+            TurnoId = 7,
+            FechaInicio = hoy,
+            FechaFin = hoy.AddDays(5)
+        });
+        await context.SaveChangesAsync();
+        var service = new TurnoService(context, new Mock<ITurnoValidacionRules>().Object);
+
+        var propios = await service.ObtenerEmpleadosAsync(7, 1, hoy);
+        var ajenos = await service.ObtenerEmpleadosAsync(7, 2, hoy);
+        var futuro = await service.ObtenerEmpleadosAsync(7, 1, hoy.AddDays(-1));
+
+        Assert.Null(ajenos);
+        Assert.NotNull(futuro);
+        Assert.Empty(futuro);
+        var empleado = Assert.Single(propios!);
+        Assert.Equal(4, empleado.EmpleadoId);
+        Assert.Equal("Ana Gómez", empleado.NombreCompleto);
+        Assert.Equal("A-4", empleado.Legajo);
+        Assert.Equal(hoy, empleado.FechaInicio);
+        Assert.Equal(hoy.AddDays(5), empleado.FechaFin);
+        Assert.DoesNotContain(
+            typeof(TurnoEmpleadoAsignadoDto).GetProperties().Select(p => p.Name),
+            nombre => nombre is "Empleado" or "Turno" or "DNI" or "CUIL");
+    }
+
+    [Fact]
+    public async Task CrearYActualizar_ConservaDescansoInclusoCero()
+    {
+        using var context = CreateContext();
+        var service = new TurnoService(context, new TurnoValidacionRules());
+        var json = """
+            {"nombre":"Jornada","toleranciaMinutos":0,"dias":[
+              {"diaSemana":0,"horaEntrada":"08:00","horaSalida":"17:00","minutosAlmuerzo":0},
+              {"diaSemana":1,"horaEntrada":"08:00","horaSalida":"17:00","minutosAlmuerzo":15},
+              {"diaSemana":2,"horaEntrada":"08:00","horaSalida":"17:00","minutosAlmuerzo":30},
+              {"diaSemana":3,"horaEntrada":"08:00","horaSalida":"17:00","minutosAlmuerzo":45},
+              {"diaSemana":4,"horaEntrada":"08:00","horaSalida":"17:00","minutosAlmuerzo":60},
+              {"diaSemana":5,"horaEntrada":"08:00","horaSalida":"17:00","minutosAlmuerzo":75},
+              {"diaSemana":6,"horaEntrada":"08:00","horaSalida":"17:00","minutosAlmuerzo":90}
+            ]}
+            """;
+        var dto = JsonSerializer.Deserialize<TurnoCrearDto>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(dto);
+        Assert.Equal(0, dto.Dias[0].MinutosAlmuerzo);
+        Assert.Equal(15, dto.Dias[1].MinutosAlmuerzo);
+
+        var creado = await service.CrearAsync(1, dto);
+        Assert.Null(creado.Error);
+        var id = creado.Turno!.Id;
+        var guardado = await service.ObtenerPorIdAsync(id, 1);
+        Assert.Equal([0, 15, 30, 45, 60, 75, 90], guardado!.Dias.OrderBy(d => d.DiaSemana).Select(d => d.MinutosAlmuerzo).ToArray());
+
+        dto.Dias[1].MinutosAlmuerzo = 120;
+        var actualizado = await service.ActualizarAsync(id, 1, dto);
+        Assert.True(actualizado.Exito);
+        var releido = await service.ObtenerPorIdAsync(id, 1);
+        Assert.Equal(0, releido!.Dias.Single(d => d.DiaSemana == 0).MinutosAlmuerzo);
+        Assert.Equal(120, releido.Dias.Single(d => d.DiaSemana == 1).MinutosAlmuerzo);
+        Assert.Equal(30, releido.Dias.Single(d => d.DiaSemana == 2).MinutosAlmuerzo);
+        Assert.Equal(60, releido.Dias.Single(d => d.DiaSemana == 4).MinutosAlmuerzo);
+        var respuesta = JsonSerializer.Serialize(releido, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Contains("\"minutosAlmuerzo\":0", respuesta);
+        Assert.Contains("\"minutosAlmuerzo\":30", respuesta);
+        Assert.Contains("\"minutosAlmuerzo\":60", respuesta);
+        Assert.DoesNotContain("\"minutosAlmuerzo\":null", respuesta);
+    }
+
+    private static Empleado Empleado(int id, int empresaId, bool activo, string nombre = "Juan", string apellido = "Pérez", string? legajo = null)
+    {
+        return new Empleado
+        {
+            Id = id,
+            EmpresaId = empresaId,
+            DNI = $"DNI-{id}",
+            CUIL = $"CUIL-{id}",
+            Nombre = nombre,
+            Apellido = apellido,
+            Legajo = legajo,
+            Activo = activo
+        };
     }
 }

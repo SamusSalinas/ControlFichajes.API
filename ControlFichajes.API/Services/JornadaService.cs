@@ -9,10 +9,12 @@ namespace ControlFichajes.API.Services;
 public class JornadaService
 {
     private readonly AppDbContext _context;
+    private readonly ILaborClock _clock;
 
-    public JornadaService(AppDbContext context)
+    public JornadaService(AppDbContext context, ILaborClock? clock = null)
     {
         _context = context;
+        _clock = clock ?? new SystemLaborClock();
     }
 
     public async Task<List<TurnoAsignacionDto>?> ObtenerAsignacionesAsync(int empleadoId, int empresaId)
@@ -275,6 +277,7 @@ public class JornadaService
 
         var inicio = desde.Date;
         var finExclusivo = hasta.Date.AddDays(1);
+        var hoy = LaborTime.Ahora(_clock).Date;
         var fichadas = await _context.Fichada
             .AsNoTracking()
             .Where(f => f.EmpleadoId == empleadoId && f.FechaHora >= inicio.AddDays(-1) && f.FechaHora < finExclusivo.AddDays(1))
@@ -282,9 +285,9 @@ public class JornadaService
             .ToListAsync();
         var reposiciones = await _context.ReposicionHoras
             .AsNoTracking()
-            .Where(r => r.EmpleadoId == empleadoId && r.Fecha >= inicio && r.Fecha < finExclusivo)
+            .Where(r => r.EmpleadoId == empleadoId && r.Fecha >= inicio && r.Fecha < finExclusivo && r.Fecha < hoy.AddDays(1))
             .SumAsync(r => (int?)r.Minutos) ?? 0;
-        var consulta = new JornadaClasificacionConsulta(_context);
+        var consulta = new JornadaClasificacionConsulta(_context, _clock);
         var horario = await consulta.CargarHorariosAsync(empresaId, [empleadoId], inicio.AddDays(-1), finExclusivo);
         var clasificacion = JornadaClasificador.Clasificar(
             fichadas.Select(f => new FichadaParaClasificar(f.Id, f.EmpleadoId, empresaId, f.FechaHora, f.EsManual)).ToList(),
@@ -300,30 +303,58 @@ public class JornadaService
 
         foreach (var jornada in calendario)
         {
+            if (jornada.Fecha.Date > hoy)
+                continue;
+
             var delDia = clasificacion.Where(c => c.JornadaFecha == DateOnly.FromDateTime(jornada.Fecha)).ToList();
-            var actividad = JornadaClasificador.MinutosActividad(delDia, fechas);
-            var trabajados = JornadaClasificador.MinutosTrabajados(delDia, fechas, jornada.MinutosAlmuerzo);
-            var incompleta = delDia.Any(c => c.JornadaEstado == JornadaClasificador.Incompleta);
-            var minutosTarde = CalcularMinutosTarde(jornada, delDia, fechas);
+            var calculo = JornadaResumenCalculo.Evaluar(
+                jornada.Fecha,
+                hoy,
+                EsDiaLaborable(jornada),
+                jornada.EsDiaLibre,
+                jornada.HoraEntrada,
+                jornada.HoraSalida,
+                jornada.ToleranciaMinutos,
+                jornada.MinutosAlmuerzo,
+                jornada.MinutosProgramados,
+                delDia,
+                fechas);
             var dia = new ResumenHorasDiaDto
             {
                 Fecha = jornada.Fecha,
-                MinutosProgramados = jornada.MinutosProgramados,
-                ActividadRegistrada = actividad,
-                MinutosTrabajados = trabajados,
-                MinutosTarde = minutosTarde,
-                MinutosSaldo = trabajados - jornada.MinutosProgramados,
-                Incompleta = incompleta
+                MinutosProgramados = calculo.MinutosProgramados,
+                ActividadRegistrada = calculo.ActividadRegistrada,
+                MinutosTrabajados = calculo.MinutosTrabajados,
+                MinutosTarde = calculo.MinutosTarde,
+                MinutosSaldo = calculo.MinutosTrabajados - calculo.MinutosProgramados,
+                Incompleta = calculo.Incompleta
             };
             resumen.Dias.Add(dia);
             resumen.MinutosProgramados += dia.MinutosProgramados;
             resumen.ActividadRegistrada += dia.ActividadRegistrada;
             resumen.MinutosTrabajados += dia.MinutosTrabajados;
+            if (calculo.LlegadaDentroTolerancia) resumen.LlegadasDentroTolerancia++;
+            if (calculo.LlegadaTarde) resumen.LlegadasTarde++;
+            if (calculo.SalidaDentroTolerancia) resumen.SalidasDentroTolerancia++;
+            if (calculo.SalidaTemprana) resumen.SalidasTempranas++;
+            if (calculo.SinRegistros) resumen.DiasSinRegistros++;
+            if (calculo.Incompleta) resumen.JornadasIncompletas++;
         }
 
         resumen.MinutosRepuestos = reposiciones;
         resumen.SaldoMinutos = resumen.MinutosTrabajados - resumen.MinutosProgramados + reposiciones;
+        resumen.MinutosAdeudados = Math.Max(0, -resumen.SaldoMinutos);
+        resumen.MinutosAFavor = Math.Max(0, resumen.SaldoMinutos);
         return resumen;
+    }
+
+    private static bool EsDiaLaborable(JornadaDiaDto jornada)
+    {
+        if (jornada.EsDiaLibre)
+            return false;
+        if (jornada.EsExcepcionManual && !string.IsNullOrWhiteSpace(jornada.HoraEntrada))
+            return true;
+        return jornada.TieneTurnoAsignado && jornada.TieneHorarioConfigurado;
     }
 
     private async Task<bool> EmpleadoExisteAsync(int empleadoId, int empresaId)
@@ -449,24 +480,6 @@ public class JornadaService
             HoraEntrada = entrada,
             HoraSalida = salida
         };
-    }
-
-    private static int CalcularMinutosTarde(
-        JornadaDiaDto jornada,
-        IReadOnlyList<ClasificacionFichada> clasificacion,
-        IReadOnlyDictionary<int, DateTime> fechas)
-    {
-        if (jornada.EsDiaLibre || string.IsNullOrWhiteSpace(jornada.HoraEntrada))
-            return 0;
-        var entrada = clasificacion
-            .Where(c => !c.EsDuplicado && c.MovimientoVisual == JornadaClasificador.Entrada)
-            .Select(c => fechas.TryGetValue(c.Id, out var fecha) ? LaborTime.Pared(fecha) : (DateTime?)null)
-            .FirstOrDefault(f => f.HasValue);
-        if (!entrada.HasValue)
-            return 0;
-        var horaEsperada = jornada.Fecha.Date.Add(TimeSpan.Parse(jornada.HoraEntrada));
-        var tolerancia = TimeSpan.FromMinutes(jornada.ToleranciaMinutos);
-        return Math.Max(0, (int)(entrada.Value - horaEsperada - tolerancia).TotalMinutes);
     }
 
     private static ReposicionHorasDto MapearReposicion(ReposicionHoras reposicion)

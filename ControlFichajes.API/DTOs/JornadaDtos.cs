@@ -82,5 +82,13 @@ public class ResumenHorasDto
     public int MinutosTrabajados { get; set; }
     public int MinutosRepuestos { get; set; }
     public int SaldoMinutos { get; set; }
+    public int MinutosAdeudados { get; set; }
+    public int MinutosAFavor { get; set; }
+    public int LlegadasDentroTolerancia { get; set; }
+    public int LlegadasTarde { get; set; }
+    public int SalidasDentroTolerancia { get; set; }
+    public int SalidasTempranas { get; set; }
+    public int DiasSinRegistros { get; set; }
+    public int JornadasIncompletas { get; set; }
     public List<ResumenHorasDiaDto> Dias { get; set; } = new();
 }

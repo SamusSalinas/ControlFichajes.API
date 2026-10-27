@@ -51,6 +51,10 @@ namespace ControlFichajes.API.Data
                 .WithMany(t => t.Dias)
                 .HasForeignKey(d => d.TurnoId)
                 .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<TurnoDia>()
+                .Property(d => d.MinutosAlmuerzo)
+                .HasSentinel(-1)
+                .ValueGeneratedNever();
             modelBuilder.Entity<EmpleadoTurno>()
                 .HasOne(a => a.Empleado)
                 .WithMany(e => e.AsignacionesTurno)

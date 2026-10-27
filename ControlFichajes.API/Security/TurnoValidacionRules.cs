@@ -43,6 +43,13 @@ public sealed class TurnoValidacionRules : ITurnoValidacionRules
             {
                 return "Cada día requiere horas válidas. Una salida anterior a la entrada es un turno nocturno; una salida igual a la entrada no es válida. La duración mínima es 60 minutos.";
             }
+
+            if (dia.MinutosAlmuerzo < 0)
+                return "El descanso no puede ser negativo.";
+
+            var bruto = (int)Duracion(entrada, salida).TotalMinutes;
+            if (dia.MinutosAlmuerzo >= bruto)
+                return "El descanso no puede ser igual o mayor que la duración del tramo.";
         }
 
         return null;

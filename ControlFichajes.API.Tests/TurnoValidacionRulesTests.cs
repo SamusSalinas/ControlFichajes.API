@@ -53,6 +53,73 @@ public class TurnoValidacionRulesTests
         Assert.Contains("mismo día", _rules.Validar(dto));
     }
 
+    [Fact]
+    public void Validar_DescansoCero_EsValido()
+    {
+        var dto = CrearTurnoValido();
+        dto.Dias[0].HoraEntrada = "08:00";
+        dto.Dias[0].HoraSalida = "17:00";
+        dto.Dias[0].MinutosAlmuerzo = 0;
+
+        Assert.Null(_rules.Validar(dto));
+    }
+
+    [Theory]
+    [InlineData(15)]
+    [InlineData(30)]
+    [InlineData(45)]
+    [InlineData(60)]
+    public void Validar_DescansoMenorA60_EsValido(int minutos)
+    {
+        var dto = CrearTurnoValido();
+        dto.Dias[0].MinutosAlmuerzo = minutos;
+
+        Assert.Null(_rules.Validar(dto));
+    }
+
+    [Fact]
+    public void Validar_DescansoNegativo_RetornaError()
+    {
+        var dto = CrearTurnoValido();
+        dto.Dias[0].MinutosAlmuerzo = -1;
+
+        Assert.Contains("negativo", _rules.Validar(dto));
+    }
+
+    [Theory]
+    [InlineData(480)]
+    [InlineData(481)]
+    public void Validar_DescansoIgualOMayorAlTramo_RetornaError(int minutos)
+    {
+        var dto = CrearTurnoValido();
+        dto.Dias[0].HoraEntrada = "08:00";
+        dto.Dias[0].HoraSalida = "16:00";
+        dto.Dias[0].MinutosAlmuerzo = minutos;
+
+        Assert.Contains("duración del tramo", _rules.Validar(dto));
+    }
+
+    [Fact]
+    public void Validar_TurnoNocturnoConDescanso_EsValido()
+    {
+        var dto = CrearTurnoValido();
+        dto.Dias[0].HoraEntrada = "22:00";
+        dto.Dias[0].HoraSalida = "06:00";
+        dto.Dias[0].MinutosAlmuerzo = 60;
+
+        Assert.Null(_rules.Validar(dto));
+    }
+
+    [Fact]
+    public void Validar_SalidaIgualAEntrada_SigueSiendoInvalida()
+    {
+        var dto = CrearTurnoValido();
+        dto.Dias[0].HoraEntrada = "22:00";
+        dto.Dias[0].HoraSalida = "22:00";
+
+        Assert.NotNull(_rules.Validar(dto));
+    }
+
     [Theory]
     [InlineData("08:00", "08:59")]
     [InlineData("08:00", "08:00")]

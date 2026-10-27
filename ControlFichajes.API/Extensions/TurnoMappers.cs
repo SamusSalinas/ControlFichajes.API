@@ -31,7 +31,7 @@ public static class TurnoMappers
             DiaSemana = dia.DiaSemana,
             HoraEntrada = TimeSpan.Parse(dia.HoraEntrada, CultureInfo.InvariantCulture),
             HoraSalida = TimeSpan.Parse(dia.HoraSalida, CultureInfo.InvariantCulture),
-            MinutosAlmuerzo = 60
+            MinutosAlmuerzo = dia.MinutosAlmuerzo
         }).ToList();
     }
 }
