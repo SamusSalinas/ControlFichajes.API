@@ -494,3 +494,5 @@ $RECYCLE.BIN/
 *.swp
 
 .Agents/
+!.agents/
+!.agents/**
