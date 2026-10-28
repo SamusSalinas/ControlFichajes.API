@@ -286,4 +286,49 @@ public class TurnosControllerTests
         var result = await controller.DeleteTurno(99);
         Assert.IsType<NotFoundResult>(result);
     }
+
+    [Theory]
+    [InlineData(AppRoles.Admin)]
+    [InlineData(AppRoles.SuperAdmin)]
+    [InlineData(AppRoles.Rrhh)]
+    public async Task GetEmpleados_RolesDeLectura_RetornaOk(string role)
+    {
+        var mockService = new Mock<ITurnoService>();
+        var fecha = new DateTime(2026, 10, 27);
+        mockService.Setup(s => s.ObtenerEmpleadosAsync(4, 1, fecha))
+            .ReturnsAsync(new List<TurnoEmpleadoAsignadoDto>
+            {
+                new() { EmpleadoId = 8, NombreCompleto = "Juan Pérez", Legajo = "12", FechaInicio = fecha }
+            });
+        var controller = CreateController(mockService, empresaId: 1, role: role);
+
+        var result = await controller.GetEmpleados(4, fecha);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var data = Assert.IsAssignableFrom<IEnumerable<TurnoEmpleadoAsignadoDto>>(ok.Value);
+        Assert.Equal("Juan Pérez", data.Single().NombreCompleto);
+    }
+
+    [Fact]
+    public async Task GetEmpleados_TurnoAjenoOInexistente_RetornaNotFound()
+    {
+        var mockService = new Mock<ITurnoService>();
+        mockService.Setup(s => s.ObtenerEmpleadosAsync(4, 1, It.IsAny<DateTime>()))
+            .ReturnsAsync((IReadOnlyList<TurnoEmpleadoAsignadoDto>?)null);
+        var controller = CreateController(mockService, empresaId: 1);
+
+        var result = await controller.GetEmpleados(4, null);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task GetEmpleados_SinEmpresa_RetornaForbid()
+    {
+        var controller = CreateController(new Mock<ITurnoService>(), empresaId: null);
+
+        var result = await controller.GetEmpleados(4, null);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
 }

@@ -42,6 +42,20 @@ public class TurnosController : ControllerBase
         return Ok(turno);
     }
 
+    [HttpGet("{id:int}/empleados")]
+    public async Task<ActionResult<IEnumerable<TurnoEmpleadoAsignadoDto>>> GetEmpleados(int id, [FromQuery] DateTime? fecha)
+    {
+        if (!EmpresaAccess.TryGetEmpresaId(User, out var empresaId) || empresaId <= 0)
+            return Forbid();
+
+        var dia = (fecha ?? LaborTime.DesdeUtc(DateTime.UtcNow)).Date;
+        var empleados = await _turnoService.ObtenerEmpleadosAsync(id, empresaId, dia);
+        if (empleados == null)
+            return NotFound();
+
+        return Ok(empleados);
+    }
+
     [HttpPost]
     [Authorize(Roles = $"{AppRoles.SuperAdmin},{AppRoles.Admin}")]
     public async Task<ActionResult<TurnoDto>> PostTurno([FromBody] TurnoCrearDto request)
