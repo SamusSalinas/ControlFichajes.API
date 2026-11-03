@@ -1,5 +1,15 @@
 # Estado actual
 
+Cierre de la noche del 2 de noviembre de 2026. No se desplegó ni se mergeó a `main`.
+
+## Verificación de la noche del 2 de noviembre de 2026
+
+No se corrió `dotnet test` completo ni se reinició el proceso de la API.
+
+- `TurnoService.EliminarAsync` permite el borrado lógico si no hay una asignación abierta ni con fin de hoy o posterior. Una asignación ya cerrada no bloquea y la fila de `EmpleadoTurno` se conserva. Sigue rechazado si hay una asignación vigente.
+- `dotnet test` con filtro `Turno_SeBorraSiSoloTieneAsignacionHistorica|Turno_NoSeBorraSiTieneAsignacionVigente|EliminarAsync_RealizaBorradoLogico` dejó 3 pruebas correctas.
+- En el frontend de la misma sesión, el editor de usuario y el tope de 7 días del turno quedaron cubiertos por checks puntuales. El inicio de sesión se vio sin asterisco rojo en `http://localhost:5173/#/login`. No se corrió `npm run check` completo ni `npm run build`.
+
 Relevado el 28 de octubre de 2026. Solo se lista lo que está en Git o lo que se ejecutó en la sesión anterior. No implica despliegue ni merge a `main`.
 
 ## Ramas
@@ -47,3 +57,11 @@ Jornadas, en la API de esa misma rama:
 ## Ya existente en `main` y conservado
 
 El README de cada repositorio y, en el frontend, `docs/FRONTEND-SECURITY.md` describen autenticación, roles, empresas, sucursales, departamentos, usuarios, agentes y fichadas. Esas funciones no se revalidaron en este relevamiento.
+
+## Informe de asistencia, 1 de noviembre de 2026
+
+Solo documentación. No se modificó código productivo, no se crearon migraciones y no se desplegó.
+
+Quedó `docs/INFORME_ASISTENCIA.md` con el problema del informe histórico, el contrato propuesto `GET /api/jornadas/informe-asistencia` y la exportación, las reglas que siguen abiertas y los criterios de aceptación. `PENDIENTES.md` y `DECISIONES_TECNICAS.md` apuntan a ese documento.
+
+El frontend, en su propio repositorio, ya consulta el informe operativo componiendo fichadas, calendario y asignaciones. Ese resultado usa el turno vigente y no reemplaza el cierre mensual que todavía no existe.

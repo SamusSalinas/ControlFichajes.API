@@ -1,5 +1,13 @@
 # Pendientes
 
+Hechos abiertos al cierre de la noche del 2 de noviembre de 2026.
+
+- `feat/turnos-asignaciones-ux` no está mergeada a `main` y no se desplegó.
+- El proceso de la API que ya estaba en marcha no se reinició. Hasta reiniciarlo, el borrado de turnos puede seguir rechazando asignaciones históricas.
+- No se repitió la suite completa de `dotnet test` ni `npm run check` del frontend.
+
+## Relevamiento anterior
+
 Hechos abiertos al 28 de octubre de 2026. No se resolvieron en este relevamiento.
 
 ## Publicación
@@ -45,3 +53,12 @@ Pasos propuestos:
 7. Dejar un resumen de archivos de documentación tocados.
 
 No incluye scripts todavía. El detalle para revisión está en la respuesta de la fase 1, no en un `SKILL.md`.
+
+## Informe de asistencia
+
+Abierto el 1 de noviembre de 2026. El detalle está en `docs/INFORME_ASISTENCIA.md`.
+
+- El frontend ya muestra un informe operativo con los contratos actuales. No es un cierre histórico.
+- Falta `GET /api/jornadas/informe-asistencia` y la exportación correspondiente.
+- Falta definir la tolerancia de salida, el snapshot del turno por jornada y el cierre mensual.
+- No se crearon migraciones ni endpoints en esta nota.

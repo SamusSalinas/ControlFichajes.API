@@ -30,6 +30,21 @@ El frontend y la API tienen remotos distintos. El directorio que los contiene no
 - La corrida habitual excluye las categorías `LocalTunnelAcceptance` y `ProductionAcceptance`.
 - Los secretos de desarrollo no se versionan: `appsettings.*.local.json` en la API y `.env.local` en el frontend.
 
+## Borrado de un turno
+
+- El listado cuenta asignaciones vigentes.
+- El DELETE hace borrado lógico. Lo rechaza solo si queda una asignación sin fecha de fin, o con fin de hoy o posterior.
+- Las filas históricas de `EmpleadoTurno` se conservan.
+
 ## Lo que no se decidió aquí
 
 No se eligió un repositorio único para la documentación, no se creó la skill de traspaso y no se cambió el descanso fijo de 60 minutos de una excepción de jornada con horario propio.
+
+## Informe de asistencia, pendiente de implementar
+
+No está en el código de la API. La propuesta está en `docs/INFORME_ASISTENCIA.md`.
+
+- El informe visible en el frontend es operativo. Usa el turno y la tolerancia vigentes, no un snapshot histórico.
+- La tolerancia de salida, mientras el turno tenga un solo `ToleranciaMinutos`, se reutiliza de forma provisoria. No es una tolerancia de salida persistida.
+- Un día sin fichadas no se llama ausencia. Licencias, vacaciones, francos y feriados siguen sin contrato.
+- El período abierto se puede recalcular. Un mes consolidado no se debería modificar en silencio. El cierre todavía no existe.
