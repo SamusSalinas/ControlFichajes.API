@@ -32,6 +32,16 @@ public static class AuthPolicy
         return LeerEntero(configuration, "Auth:InvitacionHoras", 72, minimo: 1);
     }
 
+    public static int AceptacionLimite(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:AceptacionLimite", 5, minimo: 1);
+    }
+
+    public static int AceptacionVentanaSegundos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:AceptacionVentanaSegundos", 60, minimo: 1);
+    }
+
     public static int RecuperacionHoras(IConfiguration? configuration)
     {
         return LeerEntero(configuration, "Auth:RecuperacionHoras", 1, minimo: 1);

@@ -85,6 +85,102 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
         };
     }
 
+    public async Task<AceptacionInvitacion> AceptarAsync(string token, string password)
+    {
+        if (string.IsNullOrWhiteSpace(token) || !PasswordPolitica.EsElegible(password))
+            return new AceptacionInvitacion { Estado = EstadoAceptacion.Rechazada };
+
+        var hash = TokenOpaco.Hash(token.Trim());
+        var relacional = _context.Database.IsRelational();
+        IDbContextTransaction? transaccion = null;
+        IAsyncDisposable? puerta = null;
+        try
+        {
+            var invitacion = await _context.InvitacionUsuario
+                .SingleOrDefaultAsync(i => i.TokenHash == hash);
+            if (invitacion == null)
+            {
+                await AuditarAsync("invitacion_aceptacion_rechazada", "rechazado", null, null, null);
+                return new AceptacionInvitacion { Estado = EstadoAceptacion.Rechazada };
+            }
+
+            if (relacional)
+                transaccion = await _context.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+            else
+                puerta = await PuertaInvitacion.AdquirirAsync(invitacion.UsuarioId);
+
+            if (relacional)
+                await BloquearFilaUsuarioAsync(invitacion.UsuarioId);
+
+            var ahora = DateTime.UtcNow;
+            await _context.Entry(invitacion).ReloadAsync();
+            var usuario = await _context.Usuario.SingleOrDefaultAsync(u => u.Id == invitacion.UsuarioId);
+            if (usuario != null)
+                await _context.Entry(usuario).ReloadAsync();
+
+            if (!InvitacionVigente(invitacion, ahora) || !UsuarioPendiente(usuario))
+            {
+                await AuditarAsync(
+                    "invitacion_aceptacion_rechazada",
+                    "rechazado",
+                    usuario?.Id,
+                    usuario?.Correo,
+                    null);
+                return new AceptacionInvitacion { Estado = EstadoAceptacion.Rechazada };
+            }
+
+            usuario!.PasswordHash = _passwordHasher.HashPassword(usuario, password);
+            usuario.CorreoVerificadoEn = ahora;
+            usuario.InvitacionAceptadaEn = ahora;
+            usuario.Activo = true;
+            usuario.RequiereCambioPassword = false;
+            usuario.PasswordTemporalUsada = true;
+            usuario.PasswordTemporalVenceEn = null;
+            invitacion.UsadaEn = ahora;
+
+            var otras = await _context.InvitacionUsuario
+                .Where(i => i.UsuarioId == usuario.Id && i.Id != invitacion.Id && i.UsadaEn == null && i.ExpiraEn > ahora)
+                .ToListAsync();
+            foreach (var otra in otras)
+                otra.ExpiraEn = ahora;
+
+            await _context.SaveChangesAsync();
+            if (transaccion != null)
+                await transaccion.CommitAsync();
+
+            await AuditarAsync("invitacion_aceptada", "aceptado", usuario.Id, usuario.Correo, null);
+            return new AceptacionInvitacion { Estado = EstadoAceptacion.Aceptada };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "No se pudo aceptar la invitación. Evento={Evento} Excepcion={Excepcion}",
+                "invitacion_aceptada",
+                ex.GetType().Name);
+            return new AceptacionInvitacion { Estado = EstadoAceptacion.Error };
+        }
+        finally
+        {
+            if (transaccion != null)
+                await transaccion.DisposeAsync();
+            if (puerta != null)
+                await puerta.DisposeAsync();
+        }
+    }
+
+    private static bool InvitacionVigente(InvitacionUsuario? invitacion, DateTime ahora)
+    {
+        return invitacion != null && invitacion.UsadaEn == null && invitacion.ExpiraEn > ahora;
+    }
+
+    private static bool UsuarioPendiente(Usuario? usuario)
+    {
+        return usuario != null
+            && !usuario.Activo
+            && usuario.InvitadoEn != null
+            && usuario.InvitacionAceptadaEn == null;
+    }
+
     private async Task<EstadoInvitacion> EmitirYEnviarAsync(Usuario usuario, int creadoPor, bool nuevoUsuario)
     {
         var horas = AuthPolicy.InvitacionHoras(_configuration);

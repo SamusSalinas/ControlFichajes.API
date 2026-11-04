@@ -4,6 +4,7 @@ using ControlFichajes.API.Security;
 using ControlFichajes.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 
 namespace ControlFichajes.API.Controllers
@@ -18,19 +19,24 @@ namespace ControlFichajes.API.Controllers
         private readonly IConfiguration? _configuration;
         private readonly IAuditoriaSeguridad? _auditoria;
         private readonly ILogger<AuthController>? _logger;
+        private readonly IInvitacionUsuarioService? _invitaciones;
+
+        public const string PoliticaLimiteAceptacion = "aceptar-invitacion";
 
         public AuthController(
             IAuthService authService,
             IAgenteAuthService agenteAuthService,
             IConfiguration? configuration = null,
             IAuditoriaSeguridad? auditoria = null,
-            ILogger<AuthController>? logger = null)
+            ILogger<AuthController>? logger = null,
+            IInvitacionUsuarioService? invitaciones = null)
         {
             _authService = authService;
             _agenteAuthService = agenteAuthService;
             _configuration = configuration;
             _auditoria = auditoria;
             _logger = logger;
+            _invitaciones = invitaciones;
         }
 
         [HttpPost("Login")]
@@ -71,6 +77,30 @@ namespace ControlFichajes.API.Controllers
             return token == null
                 ? Unauthorized(new { mensaje = "Credenciales de agente incorrectas." })
                 : Ok(new AuthResponseDto { Token = token, Mensaje = "Autenticación exitosa" });
+        }
+
+        [HttpPost("invitacion/aceptar")]
+        [AllowAnonymous]
+        [EnableRateLimiting(PoliticaLimiteAceptacion)]
+        public async Task<IActionResult> AceptarInvitacion([FromBody] AceptarInvitacionDto? request)
+        {
+            if (_invitaciones == null)
+                return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo aceptar la invitación." });
+
+            if (request == null
+                || !PasswordPolitica.EsElegible(request.Password)
+                || !string.Equals(request.Password, request.ConfirmarPassword, StringComparison.Ordinal))
+            {
+                return BadRequest(new { mensaje = "La contraseña no cumple las reglas o no coincide." });
+            }
+
+            var resultado = await _invitaciones.AceptarAsync(request.Token, request.Password);
+            return resultado.Estado switch
+            {
+                EstadoAceptacion.Aceptada => Ok(new { mensaje = "Invitación aceptada. Ya podés iniciar sesión." }),
+                EstadoAceptacion.Error => StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo aceptar la invitación." }),
+                _ => BadRequest(new { mensaje = "La invitación no es válida." })
+            };
         }
 
         [HttpPost("cambiar-password")]

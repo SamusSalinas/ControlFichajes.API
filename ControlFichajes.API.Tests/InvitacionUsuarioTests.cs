@@ -294,6 +294,264 @@ public class InvitacionUsuarioTests
         Assert.Contains(invitaciones, i => i.Id != vigente.Id && i.ExpiraEn <= ahora);
     }
 
+    private const string ClaveElegida = "ClaveNueva1!";
+
+    [Fact]
+    public async Task AceptarInvitacion_ActivaLaCuentaYPermiteLogin()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var principal = Principal(admin.Id, AppRoles.Admin, 1);
+        var (usuarioId, token) = await InvitarYLeerTokenAsync(context, principal, "rrhh.local", "rrhh.nuevo@empresa.test");
+        var antes = await CrearAuth(context).LoginAsync(new LoginRequestDto
+        {
+            Email = "rrhh.nuevo@empresa.test",
+            Password = ClaveElegida
+        });
+        Assert.Null(antes);
+
+        var resultado = await CrearAceptacion(context).AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida));
+
+        var ok = Assert.IsType<OkObjectResult>(resultado);
+        Assert.Equal("Invitación aceptada. Ya podés iniciar sesión.", Mensaje(ok.Value));
+        var json = JsonSerializer.Serialize(ok.Value);
+        Assert.DoesNotContain(ClaveElegida, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(token, json, StringComparison.Ordinal);
+        var usuario = await context.Usuario.SingleAsync(u => u.Id == usuarioId);
+        Assert.True(usuario.Activo);
+        Assert.False(usuario.RequiereCambioPassword);
+        Assert.NotNull(usuario.CorreoVerificadoEn);
+        Assert.NotNull(usuario.InvitacionAceptadaEn);
+        Assert.Equal(1, usuario.EmpresaId);
+        Assert.Equal(AppRoles.Rrhh, usuario.Rol);
+        Assert.Equal(PasswordVerificationResult.Success, new PasswordHasher<Usuario>().VerifyHashedPassword(usuario, usuario.PasswordHash, ClaveElegida));
+        Assert.NotNull((await context.InvitacionUsuario.SingleAsync()).UsadaEn);
+        var login = await CrearAuth(context).LoginAsync(new LoginRequestDto
+        {
+            Email = "rrhh.nuevo@empresa.test",
+            Password = ClaveElegida
+        });
+        Assert.NotNull(login);
+        Assert.False(login.RequiereCambioPassword);
+        Assert.False(string.IsNullOrWhiteSpace(login.Token));
+        var eventos = await context.AuditoriaSeguridad.Select(a => new { a.Evento, a.Resultado, a.Detalle }).ToListAsync();
+        var auditoria = string.Join('\n', eventos.Select(a => string.Join('\n', a.Evento, a.Resultado, a.Detalle)));
+        Assert.Contains("invitacion_aceptada", auditoria, StringComparison.Ordinal);
+        Assert.DoesNotContain(token, auditoria, StringComparison.Ordinal);
+        Assert.DoesNotContain(ClaveElegida, auditoria, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TokenInexistenteVencidoInvalidadoYUsadoSeRechazanIgual()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var principal = Principal(admin.Id, AppRoles.Admin, 1);
+        var (_, token) = await InvitarYLeerTokenAsync(context, principal, "rrhh.local", "rrhh.nuevo@empresa.test");
+        var invitacion = await context.InvitacionUsuario.SingleAsync();
+        invitacion.ExpiraEn = DateTime.UtcNow.AddMinutes(-5);
+        await context.SaveChangesAsync();
+        await AssertRechazoSinActivar(context, token, "rrhh.nuevo@empresa.test");
+
+        invitacion.ExpiraEn = DateTime.UtcNow.AddHours(2);
+        invitacion.UsadaEn = DateTime.UtcNow;
+        await context.SaveChangesAsync();
+        await AssertRechazoSinActivar(context, token, "rrhh.nuevo@empresa.test");
+
+        invitacion.UsadaEn = null;
+        invitacion.ExpiraEn = DateTime.UtcNow.AddMinutes(-1);
+        await context.SaveChangesAsync();
+        await AssertRechazoSinActivar(context, token, "rrhh.nuevo@empresa.test");
+
+        var inexistente = await CrearAceptacion(context).AceptarInvitacion(SolicitudAceptacion(new string('a', 43), ClaveElegida));
+        Assert.IsType<BadRequestObjectResult>(inexistente);
+        Assert.False((await context.Usuario.SingleAsync(u => u.Correo == "rrhh.nuevo@empresa.test")).Activo);
+        var suelto = new Usuario
+        {
+            EmpresaId = 1,
+            NombreUsuario = "suelto.local",
+            Correo = "suelto.local@empresa.test",
+            Rol = AppRoles.Rrhh,
+            Activo = false,
+            PasswordHash = "hash"
+        };
+        context.Usuario.Add(suelto);
+        await context.SaveChangesAsync();
+        await CrearAceptacion(context).AceptarInvitacion(SolicitudAceptacion(new string('b', 43), ClaveElegida));
+        Assert.False((await context.Usuario.SingleAsync(u => u.Id == suelto.Id)).Activo);
+    }
+
+    [Fact]
+    public async Task ElMismoTokenNoSeAceptaDosVecesYLaClaveInvalidaNoLoConsume()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var (_, token) = await InvitarYLeerTokenAsync(context, Principal(admin.Id, AppRoles.Admin, 1), "rrhh.local", "rrhh.nuevo@empresa.test");
+        var controlador = CrearAceptacion(context);
+
+        var distinta = await controlador.AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida, "OtraClave1!"));
+        var corta = await controlador.AceptarInvitacion(SolicitudAceptacion(token, "corta1!"));
+        Assert.IsType<BadRequestObjectResult>(distinta);
+        Assert.IsType<BadRequestObjectResult>(corta);
+        Assert.Null((await context.InvitacionUsuario.SingleAsync()).UsadaEn);
+        Assert.False((await context.Usuario.SingleAsync(u => u.Correo == "rrhh.nuevo@empresa.test")).Activo);
+
+        Assert.IsType<OkObjectResult>(await controlador.AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida)));
+        var segunda = await controlador.AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida));
+        var cuerpo = JsonSerializer.Serialize(Assert.IsType<BadRequestObjectResult>(segunda).Value);
+        Assert.DoesNotContain(token, cuerpo, StringComparison.Ordinal);
+        Assert.DoesNotContain(ClaveElegida, cuerpo, StringComparison.Ordinal);
+        Assert.Equal(1, await context.InvitacionUsuario.CountAsync(i => i.UsadaEn != null));
+    }
+
+    [Fact]
+    public async Task AceptarPrimeroDejaLaCuentaActivaYElReenvioNoPendiente()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var principal = Principal(admin.Id, AppRoles.Admin, 1);
+        var (usuarioId, token) = await InvitarYLeerTokenAsync(context, principal, "rrhh.local", "rrhh.nuevo@empresa.test");
+
+        Assert.IsType<OkObjectResult>(await CrearAceptacion(context).AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida)));
+        var reenvio = await CrearControlador(context, principal, new Buzon()).ReenviarInvitacion(usuarioId);
+
+        Assert.IsType<ConflictObjectResult>(reenvio);
+        var usuario = await context.Usuario.SingleAsync(u => u.Id == usuarioId);
+        Assert.True(usuario.Activo);
+        Assert.Equal(0, await context.InvitacionUsuario.CountAsync(i => i.UsadaEn == null && i.ExpiraEn > DateTime.UtcNow));
+    }
+
+    [Fact]
+    public async Task ReenviarPrimeroInvalidaElTokenYMantieneLaCuentaInactiva()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var principal = Principal(admin.Id, AppRoles.Admin, 1);
+        var (usuarioId, token) = await InvitarYLeerTokenAsync(context, principal, "rrhh.local", "rrhh.nuevo@empresa.test");
+        var hashInicial = (await context.InvitacionUsuario.SingleAsync()).TokenHash;
+
+        var reenvio = Assert.IsAssignableFrom<ObjectResult>(await CrearControlador(context, principal, new Buzon()).ReenviarInvitacion(usuarioId));
+        Assert.Equal(StatusCodes.Status200OK, reenvio.StatusCode);
+        var aceptacion = await CrearAceptacion(context).AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida));
+
+        Assert.Equal("La invitación no es válida.", Mensaje(Assert.IsType<BadRequestObjectResult>(aceptacion).Value));
+        var usuario = await context.Usuario.SingleAsync(u => u.Id == usuarioId);
+        Assert.False(usuario.Activo);
+        var ahora = DateTime.UtcNow;
+        var vigente = Assert.Single(await context.InvitacionUsuario.Where(i => i.UsadaEn == null && i.ExpiraEn > ahora).ToListAsync());
+        Assert.NotEqual(hashInicial, vigente.TokenHash);
+    }
+
+    [Fact]
+    public async Task DosAceptacionesConcurrentesProducenUnSoloExito()
+    {
+        var nombre = Guid.NewGuid().ToString();
+        await using var preparacion = CrearContexto(nombre);
+        var admin = await AgregarUsuarioAsync(preparacion, AppRoles.Admin, 1, "admin.local");
+        var (_, token) = await InvitarYLeerTokenAsync(preparacion, Principal(admin.Id, AppRoles.Admin, 1), "rrhh.local", "rrhh.nuevo@empresa.test");
+        await using var primero = CrearContexto(nombre);
+        await using var segundo = CrearContexto(nombre);
+
+        var resultados = await Task.WhenAll(
+            CrearAceptacion(primero).AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida)),
+            CrearAceptacion(segundo).AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida)));
+
+        Assert.Equal(1, resultados.Count(r => r is OkObjectResult));
+        Assert.Equal(1, resultados.Count(r => r is BadRequestObjectResult));
+        await using var lectura = CrearContexto(nombre);
+        var usuario = await lectura.Usuario.SingleAsync(u => u.Correo == "rrhh.nuevo@empresa.test");
+        Assert.True(usuario.Activo);
+        Assert.Equal(AppRoles.Rrhh, usuario.Rol);
+        Assert.Equal(1, usuario.EmpresaId);
+        Assert.Equal(1, await lectura.InvitacionUsuario.CountAsync(i => i.UsadaEn != null));
+    }
+
+    [Fact]
+    public async Task AceptacionYReenvioConcurrentesDejanUnEstadoCoherente()
+    {
+        var nombre = Guid.NewGuid().ToString();
+        await using var preparacion = CrearContexto(nombre);
+        var admin = await AgregarUsuarioAsync(preparacion, AppRoles.Admin, 1, "admin.local");
+        var principal = Principal(admin.Id, AppRoles.Admin, 1);
+        var (usuarioId, token) = await InvitarYLeerTokenAsync(preparacion, principal, "rrhh.local", "rrhh.nuevo@empresa.test");
+        await using var aceptacion = CrearContexto(nombre);
+        await using var reenvio = CrearContexto(nombre);
+
+        var resultados = await Task.WhenAll(
+            CrearAceptacion(aceptacion).AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida)),
+            CrearControlador(reenvio, principal, new Buzon()).ReenviarInvitacion(usuarioId));
+
+        await using var lectura = CrearContexto(nombre);
+        var ahora = DateTime.UtcNow;
+        var usuario = await lectura.Usuario.SingleAsync(u => u.Id == usuarioId);
+        var vigentes = await lectura.InvitacionUsuario.CountAsync(i => i.UsuarioId == usuarioId && i.UsadaEn == null && i.ExpiraEn > ahora);
+        var usadas = await lectura.InvitacionUsuario.CountAsync(i => i.UsuarioId == usuarioId && i.UsadaEn != null);
+        var acepto = resultados[0] is OkObjectResult;
+        var reenvioOk = resultados[1] is ObjectResult objeto && objeto.StatusCode == StatusCodes.Status200OK;
+        if (acepto)
+        {
+            Assert.True(usuario.Activo);
+            Assert.Equal(1, usadas);
+            Assert.Equal(0, vigentes);
+            Assert.IsType<ConflictObjectResult>(resultados[1]);
+        }
+        else
+        {
+            Assert.False(usuario.Activo);
+            Assert.Equal(0, usadas);
+            Assert.Equal(1, vigentes);
+            Assert.True(reenvioOk);
+            Assert.IsType<BadRequestObjectResult>(resultados[0]);
+        }
+        Assert.Equal(1, usuario.EmpresaId);
+        Assert.Equal(AppRoles.Rrhh, usuario.Rol);
+    }
+
+    [Fact]
+    public async Task FalloAlGuardarNoActivaNiConsumeLaInvitacion()
+    {
+        var nombre = Guid.NewGuid().ToString();
+        await using var preparacion = CrearContexto(nombre);
+        var admin = await AgregarUsuarioAsync(preparacion, AppRoles.Admin, 1, "admin.local");
+        var (_, token) = await InvitarYLeerTokenAsync(preparacion, Principal(admin.Id, AppRoles.Admin, 1), "rrhh.local", "rrhh.nuevo@empresa.test");
+        var hashAntes = (await preparacion.InvitacionUsuario.SingleAsync()).TokenHash;
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(nombre, Raiz).Options;
+        await using var fallido = new ContextoQueFalla(options);
+        var registro = new RegistroDeLog();
+        var servicio = new InvitacionUsuarioService(
+            fallido,
+            new PasswordHasher<Usuario>(),
+            new Buzon(),
+            new AuditoriaSeguridadService(
+                new AuditoriaDbContextFactory(Opciones.GetValue(preparacion, _ => throw new InvalidOperationException()).Options),
+                registro.Para<AuditoriaSeguridadService>(),
+                new HttpContextAccessor()),
+            Configuracion(true, 72),
+            registro.Para<InvitacionUsuarioService>());
+
+        var estado = await servicio.AceptarAsync(token, ClaveElegida);
+
+        Assert.Equal(EstadoAceptacion.Error, estado.Estado);
+        var texto = string.Join('\n', registro.Mensajes);
+        Assert.Contains(nameof(InvalidOperationException), texto, StringComparison.Ordinal);
+        Assert.DoesNotContain(token, texto, StringComparison.Ordinal);
+        Assert.DoesNotContain(ClaveElegida, texto, StringComparison.Ordinal);
+        await using var lectura = CrearContexto(nombre);
+        var usuario = await lectura.Usuario.SingleAsync(u => u.Correo == "rrhh.nuevo@empresa.test");
+        Assert.False(usuario.Activo);
+        Assert.Null(usuario.InvitacionAceptadaEn);
+        var invitacion = await lectura.InvitacionUsuario.SingleAsync();
+        Assert.Null(invitacion.UsadaEn);
+        Assert.Equal(hashAntes, invitacion.TokenHash);
+    }
+
+    [Fact]
+    public void AceptarInvitacion_SoloRecibeTokenYContrasena()
+    {
+        var nombres = typeof(AceptarInvitacionDto).GetProperties().Select(p => p.Name).OrderBy(n => n).ToArray();
+        Assert.Equal(new[] { "ConfirmarPassword", "Password", "Token" }, nombres);
+    }
+
     [Fact]
     public async Task AltaTradicionalYContratosDeLoginYAgenteSiguenIguales()
     {
@@ -342,6 +600,65 @@ public class InvitacionUsuarioTests
         var body = Assert.IsType<AuthResponseDto>(Assert.IsType<OkObjectResult>(agent).Value);
         AssertContrato(body);
         Assert.False(body.RequiereCambioPassword);
+    }
+
+    private static string? Mensaje(object? valor)
+    {
+        return valor?.GetType().GetProperty("mensaje")?.GetValue(valor) as string;
+    }
+
+    private static AceptarInvitacionDto SolicitudAceptacion(string token, string password, string? confirmacion = null)
+    {
+        return new AceptarInvitacionDto
+        {
+            Token = token,
+            Password = password,
+            ConfirmarPassword = confirmacion ?? password
+        };
+    }
+
+    private static async Task<(int UsuarioId, string Token)> InvitarYLeerTokenAsync(
+        AppDbContext context,
+        ClaimsPrincipal admin,
+        string nombre,
+        string correo)
+    {
+        var buzon = new Buzon();
+        await CrearControlador(context, admin, buzon).Invitar(Solicitud(1, nombre, correo, AppRoles.Rrhh));
+        var usuario = await context.Usuario.SingleAsync(u => u.Correo == correo);
+        return (usuario.Id, TokenDelEnlace(Assert.Single(buzon.Mensajes).Texto));
+    }
+
+    private static AuthController CrearAceptacion(AppDbContext context)
+    {
+        var configuration = Configuracion(true, 72);
+        var auditoria = new AuditoriaSeguridadService(
+            new AuditoriaDbContextFactory(Opciones.GetValue(context, _ => throw new InvalidOperationException()).Options),
+            new RegistroDeLog().Para<AuditoriaSeguridadService>(),
+            new HttpContextAccessor());
+        var invitaciones = new InvitacionUsuarioService(
+            context,
+            new PasswordHasher<Usuario>(),
+            new Buzon(),
+            auditoria,
+            configuration,
+            new RegistroDeLog().Para<InvitacionUsuarioService>());
+        return new AuthController(
+            CrearAuth(context),
+            new AgenteAuthService(context, new PasswordHasher<AgenteInstalacion>(), new JwtTokenService(CrearJwt())),
+            configuration,
+            invitaciones: invitaciones);
+    }
+
+    private static async Task AssertRechazoSinActivar(AppDbContext context, string token, string correo)
+    {
+        var resultado = await CrearAceptacion(context).AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida));
+        var rechazo = Assert.IsType<BadRequestObjectResult>(resultado);
+        Assert.Equal("La invitación no es válida.", Mensaje(rechazo.Value));
+        var cuerpo = JsonSerializer.Serialize(rechazo.Value);
+        Assert.DoesNotContain(token, cuerpo, StringComparison.Ordinal);
+        Assert.False((await context.Usuario.SingleAsync(u => u.Correo == correo)).Activo);
+        Assert.Contains(await context.AuditoriaSeguridad.Select(a => a.Evento).ToListAsync(), e => e == "invitacion_aceptacion_rechazada");
     }
 
     private static InvitarUsuarioDto Solicitud(int empresaId, string nombre, string correo, string rol)
@@ -540,6 +857,16 @@ public class InvitacionUsuarioTests
                 SeSolaparon = true;
                 _primero.TrySetResult();
             }
+        }
+    }
+
+    private sealed class ContextoQueFalla : AppDbContext
+    {
+        public ContextoQueFalla(DbContextOptions<AppDbContext> options) : base(options) { }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("fallo_controlado");
         }
     }
 

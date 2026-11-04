@@ -102,7 +102,36 @@ y HTML. Los logs no guardan el cuerpo, el enlace ni el token.
 La cuenta y el hash se confirman antes de abrir SMTP. Si el envío falla, la
 cuenta sigue inactiva, el hash permanece y la respuesta es `503` con un mensaje
 genérico. No hay rollback: así un reenvío posterior puede invalidar esa
-invitación y emitir otra. La aceptación del enlace no está implementada.
+invitación y emitir otra.
+
+`POST /api/Auth/invitacion/aceptar` es anónimo. El cuerpo solo trae el token,
+la contraseña y su confirmación. Un `usuarioId`, `empresaId`, `rol` o `activo`
+del cuerpo no elige la cuenta: la cuenta sale del SHA-256 del token. No había
+una política de contraseña compartida. La aceptación reutiliza las reglas que
+ya exigía `POST /api/Auth/cambiar-password`: entre 8 y 20 caracteres, con letra,
+dígito y un signo, sin espacios. El hash sigue siendo `PasswordHasher<Usuario>`.
+El alta tradicional conserva su límite de 8 a 255 porque ese contrato no cambia.
+
+La aceptación toma la misma fila de `Usuario` con `SELECT ... FOR UPDATE`,
+relee la invitación y la cuenta, y recién ahí guarda el hash, marca
+`CorreoVerificadoEn` e `InvitacionAceptadaEn`, activa al usuario, marca la
+invitación usada e invalida las otras vigentes. `RequiereCambioPassword` queda
+en falso porque la persona acaba de elegir la clave. Empresa y rol no se tocan.
+Si algo falla antes del commit, la transacción vuelve atrás. La respuesta de
+éxito es solo un mensaje: no inicia sesión. El ingreso posterior es `Login`.
+Token inexistente, vencido, invalidado o usado devuelve el mismo `400`, sin
+datos de la cuenta.
+
+Si la aceptación obtiene el bloqueo antes que un reenvío, la cuenta queda
+activa y el reenvío encuentra que ya no hay invitación pendiente. Si el reenvío
+lo obtiene antes, vence el token anterior, emite otro y la aceptación de ese
+token se rechaza; la cuenta sigue inactiva. Dos aceptaciones del mismo token
+dejan una sola aceptación exitosa.
+
+No había un limitador de solicitudes en la API. Este endpoint usa el limitador
+de ASP.NET Core, sin un paquete nuevo: 5 solicitudes por 60 segundos y por
+dirección IP. Al superarlo responde `429`. Los logs y la auditoría no guardan
+el token, la contraseña, la confirmación, el enlace ni el cuerpo.
 
 ### Alta inicial de SuperAdmin
 

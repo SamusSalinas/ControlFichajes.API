@@ -28,7 +28,9 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "invitacion_creada",
         "invitacion_invalidada",
         "invitacion_envio_aceptado",
-        "invitacion_envio_fallido"
+        "invitacion_envio_fallido",
+        "invitacion_aceptada",
+        "invitacion_aceptacion_rechazada"
     };
 
     private static readonly HashSet<string> Resultados = new(StringComparer.Ordinal)

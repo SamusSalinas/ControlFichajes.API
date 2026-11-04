@@ -182,6 +182,8 @@ public class EsquemaAutenticacionTests
         Assert.True(AuthPolicy.PermitirAltaConPassword(vacia));
         Assert.False(AuthPolicy.PermitirBootstrap(vacia));
         Assert.Equal(72, AuthPolicy.InvitacionHoras(vacia));
+        Assert.Equal(5, AuthPolicy.AceptacionLimite(vacia));
+        Assert.Equal(60, AuthPolicy.AceptacionVentanaSegundos(vacia));
         Assert.Equal(1, AuthPolicy.RecuperacionHoras(vacia));
         Assert.Equal(14, AuthPolicy.RefreshExpireDays(vacia));
         Assert.Null(AuthPolicy.UrlPublica(vacia));

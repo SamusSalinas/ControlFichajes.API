@@ -196,15 +196,7 @@ namespace ControlFichajes.API.Services
             if (request.NuevaPassword != request.ConfirmarPassword)
                 return false;
 
-            if (request.NuevaPassword.Length < 8 || request.NuevaPassword.Length > 20)
-                return false;
-
-            var hasLetter = request.NuevaPassword.Any(char.IsLetter);
-            var hasDigit = request.NuevaPassword.Any(char.IsDigit);
-            var hasSpecial = request.NuevaPassword.Any(ch => !char.IsLetterOrDigit(ch) && !char.IsWhiteSpace(ch));
-            var hasNoSpaces = !request.NuevaPassword.Contains(' ');
-
-            if (!hasLetter || !hasDigit || !hasSpecial || !hasNoSpaces)
+            if (!PasswordPolitica.EsElegible(request.NuevaPassword))
                 return false;
 
             var usuario = await _context.Usuario.FindAsync(usuarioId);

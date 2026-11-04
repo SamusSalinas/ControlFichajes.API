@@ -6,13 +6,36 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.AspNetCore.Identity;
 using ControlFichajes.API.Models;
+using ControlFichajes.API.Controllers;
 using ControlFichajes.API.Security;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
 
 builder.Services.AddControllers();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { mensaje = "Demasiadas solicitudes. Intentá más tarde." },
+            cancellationToken);
+    };
+    options.AddPolicy(AuthController.PoliticaLimiteAceptacion, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.AceptacionLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.AceptacionVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+});
 builder.Services.AddHttpContextAccessor();
 
 builder.Configuration.AddJsonFile(
@@ -123,6 +146,7 @@ app.UseHttpsRedirection();
 app.UseCors("PermitirFrontend");
 
 // 4. Agregar middlewares de autenticación y autorización (el ORDEN es vital)
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<WebSessionSecurityMiddleware>();
 app.UseMiddleware<EmpresaContextMiddleware>();
