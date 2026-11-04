@@ -75,7 +75,34 @@ Si ya existe algún usuario y el bootstrap fue habilitado de forma explícita,
 `POST /api/auth/bootstrap` responde `409 Conflict`.
 
 En el funcionamiento normal se utiliza el token de un administrador para crear
-nuevos usuarios.
+nuevos usuarios. `POST /api/usuarios` sigue aceptando contraseña mientras
+`Auth:PermitirAltaConPassword` sea `true`.
+
+### Invitación
+
+`POST /api/usuarios/invitar` usa las mismas reglas de empresa y rol que el alta
+con contraseña. No recibe ni devuelve contraseña, JWT ni token de invitación.
+El usuario queda inactivo, con `InvitadoEn` cargado y una contraseña que no se
+conserva en claro. El cuerpo no puede crear un `SuperAdmin`.
+
+El token sale de `RandomNumberGenerator` con 32 bytes, se codifica en Base64
+url-safe y en la base solo se guarda su SHA-256. Vence a las
+`Auth:InvitacionHoras`. Una invitación nueva deja vencidas las anteriores
+vigentes del mismo usuario. Esa invalidación y el alta del hash ocurren en una
+transacción: MySQL toma `SELECT ... FOR UPDATE` sobre la fila del usuario, así
+otras instancias de la API esperan su turno. `POST /api/usuarios/{id}/reenviar-invitacion`
+emite otro token; no reutiliza el anterior. El envío SMTP queda fuera de la transacción.
+
+El enlace usa `App:PublicBaseUrl` y el correo sale por `ICorreoSaliente`.
+MailKit lee `Smtp:Host`, `Smtp:Port`, `Smtp:User`, `Smtp:Password`, `Smtp:From`
+y `Smtp:EnableSsl`. El laboratorio local apunta el SMTP a `127.0.0.1:1025`.
+Esa dirección no va en la configuración de producción. El mensaje tiene texto
+y HTML. Los logs no guardan el cuerpo, el enlace ni el token.
+
+La cuenta y el hash se confirman antes de abrir SMTP. Si el envío falla, la
+cuenta sigue inactiva, el hash permanece y la respuesta es `503` con un mensaje
+genérico. No hay rollback: así un reenvío posterior puede invalidar esa
+invitación y emitir otra. La aceptación del enlace no está implementada.
 
 ### Alta inicial de SuperAdmin
 

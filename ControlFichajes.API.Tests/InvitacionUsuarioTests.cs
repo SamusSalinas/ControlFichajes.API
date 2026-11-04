@@ -1,0 +1,585 @@
+using System.Runtime.CompilerServices;
+using System.Security.Claims;
+using System.Text.Json;
+using ControlFichajes.API.Constants;
+using ControlFichajes.API.Controllers;
+using ControlFichajes.API.Data;
+using ControlFichajes.API.DTOs;
+using ControlFichajes.API.Models;
+using ControlFichajes.API.Security;
+using ControlFichajes.API.Services;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+
+namespace ControlFichajes.API.Tests;
+
+public class InvitacionUsuarioTests
+{
+    private const string Password = "Password123!";
+
+    [Fact]
+    public async Task Admin_NoInvitaFueraDeSuEmpresaNiOtroRol()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var controller = CrearControlador(context, Principal(admin.Id, AppRoles.Admin, 1), new Buzon());
+
+        var fuera = await controller.Invitar(Solicitud(2, "rrhh.fuera", "rrhh.fuera@empresa.test", AppRoles.Rrhh));
+        var adminRol = await controller.Invitar(Solicitud(1, "otro.admin", "otro.admin@empresa.test", AppRoles.Admin));
+        var super = await controller.Invitar(Solicitud(1, "super.admin", "super.admin@empresa.test", AppRoles.SuperAdmin));
+        var propia = await controller.Invitar(Solicitud(2, "rrhh.propia", "rrhh.propia@empresa.test", AppRoles.Rrhh));
+
+        Assert.IsType<BadRequestObjectResult>(adminRol);
+        Assert.IsType<BadRequestObjectResult>(super);
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(fuera).StatusCode);
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(propia).StatusCode);
+        Assert.Equal(1, (await context.Usuario.SingleAsync(u => u.Correo == "rrhh.fuera@empresa.test")).EmpresaId);
+        Assert.Equal(1, (await context.Usuario.SingleAsync(u => u.Correo == "rrhh.propia@empresa.test")).EmpresaId);
+        Assert.False(await context.Usuario.AnyAsync(u => u.Correo == "otro.admin@empresa.test" || u.Correo == "super.admin@empresa.test"));
+    }
+
+    [Fact]
+    public async Task SuperAdmin_InvitaAdminYRrhhDentroDeLaEmpresaSeleccionada()
+    {
+        await using var context = CrearContexto();
+        var super = await AgregarUsuarioAsync(context, AppRoles.SuperAdmin, 1, "super.local");
+        var controller = CrearControlador(context, Principal(super.Id, AppRoles.SuperAdmin, 1), new Buzon());
+
+        var otra = await controller.Invitar(Solicitud(2, "admin.dos", "admin.dos@empresa.test", AppRoles.Admin));
+        var admin = await controller.Invitar(Solicitud(1, "admin.uno", "admin.uno@empresa.test", AppRoles.Admin));
+        var rrhh = await controller.Invitar(Solicitud(1, "rrhh.uno", "rrhh.uno@empresa.test", AppRoles.Rrhh));
+
+        Assert.IsType<ForbidResult>(otra);
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(admin).StatusCode);
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(rrhh).StatusCode);
+        Assert.Equal(AppRoles.Admin, (await context.Usuario.SingleAsync(u => u.Correo == "admin.uno@empresa.test")).Rol);
+        Assert.Equal(1, (await context.Usuario.SingleAsync(u => u.Correo == "rrhh.uno@empresa.test")).EmpresaId);
+    }
+
+    [Fact]
+    public async Task CorreoDuplicadoSeRechazaYElCorreoSeNormaliza()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var controller = CrearControlador(context, Principal(admin.Id, AppRoles.Admin, 1), new Buzon());
+
+        var primero = await controller.Invitar(Solicitud(1, "rrhh.local", "  rrhh.nuevo@empresa.test\t", AppRoles.Rrhh));
+        var duplicado = await controller.Invitar(Solicitud(1, "rrhh.otro", "rrhh.nuevo@empresa.test", AppRoles.Rrhh));
+
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(primero).StatusCode);
+        Assert.IsType<ConflictObjectResult>(duplicado);
+        var usuario = await context.Usuario.SingleAsync(u => u.NombreUsuario == "rrhh.local");
+        Assert.Equal("rrhh.nuevo@empresa.test", usuario.Correo);
+        Assert.Equal(2, await context.Usuario.CountAsync());
+    }
+
+    [Fact]
+    public async Task InvitadoQuedaInactivoSinClaveUtilizableNiTokenEnLaRespuesta()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var buzon = new Buzon();
+        var controller = CrearControlador(context, Principal(admin.Id, AppRoles.Admin, 1), buzon);
+
+        var result = await controller.Invitar(Solicitud(1, "rrhh.local", "rrhh.nuevo@empresa.test", AppRoles.Rrhh));
+
+        var creado = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status201Created, creado.StatusCode);
+        var dto = Assert.IsType<InvitacionCreadaDto>(creado.Value);
+        Assert.False(dto.Activo);
+        var json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", json, StringComparison.OrdinalIgnoreCase);
+        var usuario = await context.Usuario.SingleAsync(u => u.Id == dto.Id);
+        Assert.False(usuario.Activo);
+        Assert.NotNull(usuario.InvitadoEn);
+        Assert.Null(usuario.InvitacionAceptadaEn);
+        Assert.Equal(
+            PasswordVerificationResult.Failed,
+            new PasswordHasher<Usuario>().VerifyHashedPassword(usuario, usuario.PasswordHash, Password));
+        var mensaje = Assert.Single(buzon.Mensajes);
+        var token = TokenDelEnlace(mensaje.Texto);
+        Assert.Equal(TokenOpaco.Bytes, Decodificar(token).Length);
+        Assert.DoesNotContain(token, json, StringComparison.Ordinal);
+        Assert.Equal(TokenOpaco.Hash(token), (await context.InvitacionUsuario.SingleAsync()).TokenHash);
+        Assert.Equal(64, (await context.InvitacionUsuario.SingleAsync()).TokenHash.Length);
+        AssertNoContieneSecreto(context, token, Password);
+    }
+
+    [Fact]
+    public async Task TokenVenceYLaInvitacionAnteriorQuedaInvalidada()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var buzon = new Buzon();
+        var controller = CrearControlador(context, Principal(admin.Id, AppRoles.Admin, 1), buzon, horas: 5);
+        var antes = DateTime.UtcNow;
+
+        await controller.Invitar(Solicitud(1, "rrhh.local", "rrhh.nuevo@empresa.test", AppRoles.Rrhh));
+        var usuario = await context.Usuario.SingleAsync(u => u.Correo == "rrhh.nuevo@empresa.test");
+        var reenvio = await controller.ReenviarInvitacion(usuario.Id);
+
+        Assert.Equal(StatusCodes.Status200OK, Assert.IsType<ObjectResult>(reenvio).StatusCode);
+        var invitaciones = await context.InvitacionUsuario.OrderBy(i => i.Id).ToListAsync();
+        Assert.Equal(2, invitaciones.Count);
+        Assert.True(invitaciones[0].ExpiraEn <= DateTime.UtcNow);
+        Assert.True(invitaciones[1].ExpiraEn > antes.AddHours(4));
+        Assert.NotEqual(invitaciones[0].TokenHash, invitaciones[1].TokenHash);
+        Assert.Contains(await context.AuditoriaSeguridad.Select(a => a.Evento).ToListAsync(), e => e == "invitacion_invalidada");
+        Assert.Equal(2, buzon.Mensajes.Count);
+        Assert.NotEqual(TokenDelEnlace(buzon.Mensajes[0].Texto), TokenDelEnlace(buzon.Mensajes[1].Texto));
+    }
+
+    [Fact]
+    public async Task SmtpRecibeTextoYHtmlSinGuardarElToken()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var buzon = new Buzon();
+        var controller = CrearControlador(context, Principal(admin.Id, AppRoles.Admin, 1), buzon);
+
+        await controller.Invitar(Solicitud(1, "rrhh.local", "rrhh.nuevo@empresa.test", AppRoles.Rrhh));
+
+        var mensaje = Assert.Single(buzon.Mensajes);
+        Assert.Equal("rrhh.nuevo@empresa.test", mensaje.Destinatario);
+        Assert.Contains("http://127.0.0.1:5173/aceptar-invitacion?token=", mensaje.Texto, StringComparison.Ordinal);
+        Assert.Contains("http://127.0.0.1:5173/aceptar-invitacion?token=", mensaje.Html, StringComparison.Ordinal);
+        Assert.Contains("<p>", mensaje.Html, StringComparison.Ordinal);
+        var eventos = await context.AuditoriaSeguridad.Select(a => a.Evento).OrderBy(e => e).ToListAsync();
+        Assert.Contains("invitacion_creada", eventos);
+        Assert.Contains("invitacion_envio_aceptado", eventos);
+        AssertNoContieneSecreto(context, TokenDelEnlace(mensaje.Texto));
+    }
+
+    [Fact]
+    public async Task FalloSmtp_DejaLaCuentaInactivaYElHash()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var registro = new RegistroDeLog();
+        var controller = CrearControlador(
+            context,
+            Principal(admin.Id, AppRoles.Admin, 1),
+            new SmtpQueFalla(),
+            registro.Para<InvitacionUsuarioService>());
+
+        var result = await controller.Invitar(Solicitud(1, "rrhh.local", "rrhh.nuevo@empresa.test", AppRoles.Rrhh));
+
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, Assert.IsType<ObjectResult>(result).StatusCode);
+        var usuario = await context.Usuario.SingleAsync(u => u.Correo == "rrhh.nuevo@empresa.test");
+        Assert.False(usuario.Activo);
+        var invitacion = Assert.Single(await context.InvitacionUsuario.ToListAsync());
+        Assert.Equal(64, invitacion.TokenHash.Length);
+        Assert.Null(invitacion.UsadaEn);
+        Assert.True(invitacion.ExpiraEn > DateTime.UtcNow);
+        var login = await CrearAuth(context).LoginAsync(new LoginRequestDto
+        {
+            Email = usuario.Correo,
+            Password = Password
+        });
+        Assert.Null(login);
+        var texto = string.Join('\n', registro.Mensajes);
+        Assert.Contains("InvalidOperationException", texto, StringComparison.Ordinal);
+        Assert.DoesNotContain("token-secreto", texto, StringComparison.Ordinal);
+        Assert.DoesNotContain(Password, texto, StringComparison.Ordinal);
+        Assert.Contains(
+            await context.AuditoriaSeguridad.Select(a => a.Evento).ToListAsync(),
+            e => e == "invitacion_envio_fallido");
+    }
+
+    [Fact]
+    public async Task ReenviosConcurrentesDelMismoUsuarioDejanUnaSolaInvitacionVigente()
+    {
+        var nombre = Guid.NewGuid().ToString();
+        await using var preparacion = CrearContexto(nombre);
+        var admin = await AgregarUsuarioAsync(preparacion, AppRoles.Admin, 1, "admin.local");
+        var alta = CrearControlador(preparacion, Principal(admin.Id, AppRoles.Admin, 1), new Buzon());
+        await alta.Invitar(Solicitud(1, "rrhh.local", "rrhh.nuevo@empresa.test", AppRoles.Rrhh));
+        var usuarioId = (await preparacion.Usuario.SingleAsync(u => u.Correo == "rrhh.nuevo@empresa.test")).Id;
+        var hashInicial = (await preparacion.InvitacionUsuario.SingleAsync()).TokenHash;
+
+        await using var primero = CrearContexto(nombre);
+        await using var segundo = CrearContexto(nombre);
+        var buzon1 = new Buzon();
+        var buzon2 = new Buzon();
+        var reenvio1 = CrearControlador(primero, Principal(admin.Id, AppRoles.Admin, 1), buzon1).ReenviarInvitacion(usuarioId);
+        var reenvio2 = CrearControlador(segundo, Principal(admin.Id, AppRoles.Admin, 1), buzon2).ReenviarInvitacion(usuarioId);
+        var resultados = await Task.WhenAll(reenvio1, reenvio2);
+
+        Assert.All(resultados, resultado =>
+            Assert.Equal(StatusCodes.Status200OK, Assert.IsType<ObjectResult>(resultado).StatusCode));
+        await using var lectura = CrearContexto(nombre);
+        var invitaciones = await lectura.InvitacionUsuario.OrderBy(i => i.Id).ToListAsync();
+        var ahora = DateTime.UtcNow;
+        var vigente = Assert.Single(invitaciones, i => i.UsadaEn == null && i.ExpiraEn > ahora);
+        Assert.Equal(3, invitaciones.Count);
+        Assert.NotEqual(hashInicial, vigente.TokenHash);
+        Assert.All(invitaciones.Where(i => i.Id != vigente.Id), i => Assert.True(i.ExpiraEn <= ahora));
+        var enviados = new[] { buzon1, buzon2 }
+            .Select(b => TokenOpaco.Hash(TokenDelEnlace(Assert.Single(b.Mensajes).Texto)))
+            .ToList();
+        Assert.Equal(2, enviados.Distinct().Count());
+        Assert.Contains(vigente.TokenHash, enviados);
+        Assert.False((await lectura.Usuario.SingleAsync(u => u.Id == usuarioId)).Activo);
+    }
+
+    [Fact]
+    public async Task ReenviosConcurrentesDeUsuariosDistintosConservanUnaVigentePorUsuario()
+    {
+        var nombre = Guid.NewGuid().ToString();
+        await using var preparacion = CrearContexto(nombre);
+        var admin = await AgregarUsuarioAsync(preparacion, AppRoles.Admin, 1, "admin.local");
+        var alta = CrearControlador(preparacion, Principal(admin.Id, AppRoles.Admin, 1), new Buzon());
+        await alta.Invitar(Solicitud(1, "rrhh.uno", "rrhh.uno@empresa.test", AppRoles.Rrhh));
+        await alta.Invitar(Solicitud(1, "rrhh.dos", "rrhh.dos@empresa.test", AppRoles.Rrhh));
+        var primeroId = (await preparacion.Usuario.SingleAsync(u => u.Correo == "rrhh.uno@empresa.test")).Id;
+        var segundoId = (await preparacion.Usuario.SingleAsync(u => u.Correo == "rrhh.dos@empresa.test")).Id;
+        var hashesIniciales = await preparacion.InvitacionUsuario.Select(i => i.TokenHash).ToListAsync();
+
+        await using var contextoUno = CrearContexto(nombre);
+        await using var contextoDos = CrearContexto(nombre);
+        var correo = new CorreoConBarrera();
+        var reenvio1 = CrearControlador(contextoUno, Principal(admin.Id, AppRoles.Admin, 1), correo).ReenviarInvitacion(primeroId);
+        var reenvio2 = CrearControlador(contextoDos, Principal(admin.Id, AppRoles.Admin, 1), correo).ReenviarInvitacion(segundoId);
+        var resultados = await Task.WhenAll(reenvio1, reenvio2);
+
+        Assert.All(resultados, resultado =>
+            Assert.Equal(StatusCodes.Status200OK, Assert.IsType<ObjectResult>(resultado).StatusCode));
+        Assert.True(correo.SeSolaparon);
+        await using var lectura = CrearContexto(nombre);
+        var ahora = DateTime.UtcNow;
+        foreach (var usuarioId in new[] { primeroId, segundoId })
+        {
+            var invitaciones = await lectura.InvitacionUsuario.Where(i => i.UsuarioId == usuarioId).ToListAsync();
+            var vigente = Assert.Single(invitaciones, i => i.UsadaEn == null && i.ExpiraEn > ahora);
+            Assert.DoesNotContain(vigente.TokenHash, hashesIniciales);
+            Assert.Contains(invitaciones, i => i.TokenHash != vigente.TokenHash && i.ExpiraEn <= ahora);
+        }
+    }
+
+    [Fact]
+    public async Task FalloSmtpConcurrenteDejaUnaInvitacionYLaCuentaInactiva()
+    {
+        var nombre = Guid.NewGuid().ToString();
+        await using var preparacion = CrearContexto(nombre);
+        var admin = await AgregarUsuarioAsync(preparacion, AppRoles.Admin, 1, "admin.local");
+        await CrearControlador(preparacion, Principal(admin.Id, AppRoles.Admin, 1), new Buzon())
+            .Invitar(Solicitud(1, "rrhh.local", "rrhh.nuevo@empresa.test", AppRoles.Rrhh));
+        var usuarioId = (await preparacion.Usuario.SingleAsync(u => u.Correo == "rrhh.nuevo@empresa.test")).Id;
+
+        await using var primero = CrearContexto(nombre);
+        await using var segundo = CrearContexto(nombre);
+        var reenvio1 = CrearControlador(primero, Principal(admin.Id, AppRoles.Admin, 1), new SmtpQueFalla()).ReenviarInvitacion(usuarioId);
+        var reenvio2 = CrearControlador(segundo, Principal(admin.Id, AppRoles.Admin, 1), new SmtpQueFalla()).ReenviarInvitacion(usuarioId);
+        var resultados = await Task.WhenAll(reenvio1, reenvio2);
+
+        Assert.All(resultados, resultado =>
+        {
+            var respuesta = Assert.IsType<ObjectResult>(resultado);
+            Assert.Equal(StatusCodes.Status503ServiceUnavailable, respuesta.StatusCode);
+            Assert.DoesNotContain("token", JsonSerializer.Serialize(respuesta.Value), StringComparison.OrdinalIgnoreCase);
+        });
+        await using var lectura = CrearContexto(nombre);
+        var usuario = await lectura.Usuario.SingleAsync(u => u.Id == usuarioId);
+        Assert.False(usuario.Activo);
+        var ahora = DateTime.UtcNow;
+        var invitaciones = await lectura.InvitacionUsuario.ToListAsync();
+        var vigente = Assert.Single(invitaciones, i => i.UsadaEn == null && i.ExpiraEn > ahora);
+        Assert.Equal(64, vigente.TokenHash.Length);
+        Assert.Contains(invitaciones, i => i.Id != vigente.Id && i.ExpiraEn <= ahora);
+    }
+
+    [Fact]
+    public async Task AltaTradicionalYContratosDeLoginYAgenteSiguenIguales()
+    {
+        await using var context = CrearContexto();
+        var configuration = CrearJwt();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local", Password);
+        var controller = new UsuariosController(
+            CrearAuth(context, configuration),
+            configuration: Configuracion(true, 72))
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = Principal(admin.Id, AppRoles.Admin, 1) }
+            }
+        };
+
+        var alta = await controller.Crear(new UsuarioRegistroDto
+        {
+            EmpresaId = 2,
+            NombreUsuario = "rrhh.local",
+            Email = "rrhh.alta@empresa.test",
+            Password = Password,
+            Rol = AppRoles.Rrhh
+        });
+        var creado = Assert.IsType<ObjectResult>(alta);
+        Assert.Equal(StatusCodes.Status201Created, creado.StatusCode);
+        AssertContrato(Assert.IsType<AuthResponseDto>(creado.Value));
+        Assert.Equal(1, (await context.Usuario.SingleAsync(u => u.Correo == "rrhh.alta@empresa.test")).EmpresaId);
+
+        var login = await new AuthController(CrearAuth(context, configuration), new AgenteAuthService(context, new PasswordHasher<AgenteInstalacion>(), new JwtTokenService(configuration)))
+            .Login(new LoginRequestDto { Email = "admin.local@empresa.test", Password = Password });
+        AssertContrato(Assert.IsType<AuthResponseDto>(Assert.IsType<OkObjectResult>(login).Value));
+
+        var sucursal = new Sucursal { Nombre = "Central", EmpresaId = 1, SerialLector = "lector-local" };
+        context.Sucursal.Add(sucursal);
+        await context.SaveChangesAsync();
+        var agente = new AgenteInstalacion { ClientId = "agente-local", Nombre = "Agente", SucursalId = sucursal.Id, Activo = true };
+        const string secreto = "SecretoAgente1234";
+        agente.SecretHash = new PasswordHasher<AgenteInstalacion>().HashPassword(agente, secreto);
+        context.AgenteInstalacion.Add(agente);
+        await context.SaveChangesAsync();
+        var agent = await new AuthController(
+            CrearAuth(context, configuration),
+            new AgenteAuthService(context, new PasswordHasher<AgenteInstalacion>(), new JwtTokenService(configuration)))
+            .LoginAgente(new AgenteLoginDto { ClientId = "agente-local", ClientSecret = secreto });
+        var body = Assert.IsType<AuthResponseDto>(Assert.IsType<OkObjectResult>(agent).Value);
+        AssertContrato(body);
+        Assert.False(body.RequiereCambioPassword);
+    }
+
+    private static InvitarUsuarioDto Solicitud(int empresaId, string nombre, string correo, string rol)
+    {
+        return new InvitarUsuarioDto
+        {
+            EmpresaId = empresaId,
+            NombreUsuario = nombre,
+            Email = correo,
+            Rol = rol
+        };
+    }
+
+    private static void AssertContrato(AuthResponseDto result)
+    {
+        var json = JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var documento = JsonDocument.Parse(json);
+        var nombres = documento.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray();
+        Assert.Equal(["mensaje", "requiereCambioPassword", "token"], nombres);
+    }
+
+    private static void AssertNoContieneSecreto(AppDbContext context, params string[] secretos)
+    {
+        foreach (var evento in context.AuditoriaSeguridad)
+        {
+            var texto = string.Join('\n', evento.Correo, evento.Evento, evento.Resultado, evento.Ip, evento.UserAgent, evento.Detalle);
+            foreach (var secreto in secretos)
+                Assert.DoesNotContain(secreto, texto, StringComparison.Ordinal);
+        }
+
+        foreach (var invitacion in context.InvitacionUsuario)
+        {
+            foreach (var secreto in secretos)
+                Assert.DoesNotContain(secreto, invitacion.TokenHash, StringComparison.Ordinal);
+        }
+    }
+
+    private static string TokenDelEnlace(string texto)
+    {
+        const string marca = "token=";
+        var inicio = texto.IndexOf(marca, StringComparison.Ordinal);
+        Assert.True(inicio >= 0);
+        var token = texto[(inicio + marca.Length)..].Trim();
+        var corte = token.IndexOfAny([' ', '\r', '\n', '"', '<']);
+        return corte < 0 ? token : token[..corte];
+    }
+
+    private static byte[] Decodificar(string token)
+    {
+        var normalizado = token.Replace('-', '+').Replace('_', '/');
+        var resto = normalizado.Length % 4;
+        if (resto != 0)
+            normalizado = normalizado.PadRight(normalizado.Length + 4 - resto, '=');
+        return Convert.FromBase64String(normalizado);
+    }
+
+    private static readonly ConditionalWeakTable<AppDbContext, OpcionesGuardadas> Opciones = new();
+    private static readonly InMemoryDatabaseRoot Raiz = new();
+
+    private static AppDbContext CrearContexto(string? nombre = null)
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(nombre ?? Guid.NewGuid().ToString(), Raiz)
+            .Options;
+        var context = new AppDbContext(options);
+        Opciones.Add(context, new OpcionesGuardadas { Options = options });
+        if (!context.Empresa.Any())
+        {
+            context.Empresa.AddRange(
+                new Empresa { Id = 1, NombreFantasia = "Uno", RazonSocial = "Uno S.A.", CUIT = "30-11111111-1" },
+                new Empresa { Id = 2, NombreFantasia = "Dos", RazonSocial = "Dos S.A.", CUIT = "30-22222222-2" });
+            context.SaveChanges();
+        }
+        return context;
+    }
+
+    private static UsuariosController CrearControlador(
+        AppDbContext context,
+        ClaimsPrincipal user,
+        ICorreoSaliente correo,
+        ILogger<InvitacionUsuarioService>? logger = null,
+        int horas = 72)
+    {
+        var auditoria = new AuditoriaSeguridadService(
+            new AuditoriaDbContextFactory(Opciones.GetValue(context, _ => throw new InvalidOperationException()).Options),
+            new RegistroDeLog().Para<AuditoriaSeguridadService>(),
+            new HttpContextAccessor());
+        var invitaciones = new InvitacionUsuarioService(
+            context,
+            new PasswordHasher<Usuario>(),
+            correo,
+            auditoria,
+            Configuracion(true, horas),
+            logger ?? new RegistroDeLog().Para<InvitacionUsuarioService>());
+        return new UsuariosController(CrearAuth(context), invitaciones, Configuracion(true, horas))
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = user }
+            }
+        };
+    }
+
+    private static AuthService CrearAuth(AppDbContext context, IConfiguration? configuration = null)
+    {
+        return new AuthService(context, new PasswordHasher<Usuario>(), new JwtTokenService(configuration ?? CrearJwt()));
+    }
+
+    private static IConfiguration CrearJwt()
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "clave-super-secreta-de-pruebas-1234567890",
+                ["Jwt:Issuer"] = "ControlFichajes.Tests",
+                ["Jwt:Audience"] = "ControlFichajes.Frontend.Tests",
+                ["Jwt:ExpireMinutes"] = "60"
+            })
+            .Build();
+    }
+
+    private static IConfiguration Configuracion(bool altaConPassword, int horas)
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Auth:PermitirAltaConPassword"] = altaConPassword ? "true" : "false",
+                ["Auth:InvitacionHoras"] = horas.ToString(),
+                ["App:PublicBaseUrl"] = "http://127.0.0.1:5173"
+            })
+            .Build();
+    }
+
+    private static async Task<Usuario> AgregarUsuarioAsync(AppDbContext context, string rol, int empresaId, string nombre, string? password = null)
+    {
+        var usuario = new Usuario
+        {
+            EmpresaId = empresaId,
+            NombreUsuario = nombre,
+            Correo = nombre + "@empresa.test",
+            Rol = rol,
+            Activo = true
+        };
+        usuario.PasswordHash = new PasswordHasher<Usuario>().HashPassword(usuario, password ?? Password);
+        context.Usuario.Add(usuario);
+        await context.SaveChangesAsync();
+        return usuario;
+    }
+
+    private static ClaimsPrincipal Principal(int usuarioId, string rol, int empresaId)
+    {
+        return new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, usuarioId.ToString()),
+                new Claim(ClaimTypes.Role, rol),
+                new Claim("token_use", "web"),
+                new Claim("empresa_id", empresaId.ToString())
+            ],
+            "Test",
+            ClaimTypes.Name,
+            ClaimTypes.Role));
+    }
+
+    private sealed class OpcionesGuardadas
+    {
+        public required DbContextOptions<AppDbContext> Options { get; init; }
+    }
+
+    private sealed class Buzon : ICorreoSaliente
+    {
+        public List<CorreoSaliente> Mensajes { get; } = [];
+
+        public Task EnviarAsync(CorreoSaliente mensaje, CancellationToken cancellationToken = default)
+        {
+            Mensajes.Add(mensaje);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CorreoConBarrera : ICorreoSaliente
+    {
+        private readonly TaskCompletionSource _primero = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _llegadas;
+        public bool SeSolaparon { get; private set; }
+
+        public async Task EnviarAsync(CorreoSaliente mensaje, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _llegadas) == 1)
+            {
+                var espera = _primero.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken);
+                var limite = Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+                SeSolaparon = await Task.WhenAny(espera, limite) == espera && espera.IsCompletedSuccessfully;
+            }
+            else
+            {
+                SeSolaparon = true;
+                _primero.TrySetResult();
+            }
+        }
+    }
+
+    private sealed class SmtpQueFalla : ICorreoSaliente
+    {
+        public Task EnviarAsync(CorreoSaliente mensaje, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Password123! token-secreto");
+        }
+    }
+
+    private sealed class RegistroDeLog : ILogger
+    {
+        public List<string> Mensajes { get; } = [];
+
+        public ILogger<T> Para<T>() => new RegistroTipado<T>(this);
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => Vacio.Instancia;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Mensajes.Add(formatter(state, exception));
+        }
+
+        private sealed class RegistroTipado<T> : ILogger<T>
+        {
+            private readonly RegistroDeLog _inner;
+            public RegistroTipado(RegistroDeLog inner) => _inner = inner;
+            public IDisposable BeginScope<TState>(TState state) where TState : notnull => _inner.BeginScope(state);
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+                => _inner.Log(logLevel, eventId, state, exception, formatter);
+        }
+
+        private sealed class Vacio : IDisposable
+        {
+            public static readonly Vacio Instancia = new();
+            public void Dispose() { }
+        }
+    }
+}

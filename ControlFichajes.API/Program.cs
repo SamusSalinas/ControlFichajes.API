@@ -47,6 +47,8 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<ICorreoSaliente, MailKitCorreoSaliente>();
+builder.Services.AddScoped<IInvitacionUsuarioService, InvitacionUsuarioService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IAgenteAuthService, AgenteAuthService>();
 builder.Services.AddScoped<IAgenteAdminService, AgenteAdminService>();

@@ -24,7 +24,11 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "usuario_estado",
         "usuario_rol",
         "usuario_identidad",
-        "usuario_desbloqueo"
+        "usuario_desbloqueo",
+        "invitacion_creada",
+        "invitacion_invalidada",
+        "invitacion_envio_aceptado",
+        "invitacion_envio_fallido"
     };
 
     private static readonly HashSet<string> Resultados = new(StringComparer.Ordinal)
@@ -40,7 +44,9 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "inactivo",
         "identidad",
         "rol=ADMIN",
-        "rol=RRHH"
+        "rol=RRHH",
+        "invitacion_anterior",
+        "smtp"
     };
 
     private readonly IDbContextFactory<AppDbContext> _contextFactory;
