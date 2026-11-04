@@ -124,6 +124,7 @@ public class SesionWebTests
         Assert.NotEqual(fila.TokenHash, body.Token);
         Assert.True(fila.ExpiraEn <= fila.CreadaEn.AddDays(14).AddSeconds(1));
         Assert.True(fila.ExpiraEn <= DateTime.UtcNow.AddHours(12).AddMinutes(1));
+        Assert.Null(fila.Generacion);
         Assert.Contains("no-store", http.Response.Headers.CacheControl.ToString(), StringComparison.Ordinal);
         var cookie = Assert.Single(http.Response.Headers.SetCookie.ToArray());
         Assert.Contains("cf_refresh=", cookie, StringComparison.Ordinal);
@@ -520,6 +521,294 @@ public class SesionWebTests
         }).Build();
         Assert.Equal(SameSiteMode.None, CookieSesion.Modo(cruzado));
         Assert.True(CookieSesion.Secure(desarrollo: true, https: false, cruzado));
+    }
+
+    [Fact]
+    public async Task LoginDeA_LuegoB_LaRespuestaPendienteDeAConservaLaCookieDeB()
+    {
+        await using var context = CrearMemoria();
+        var usuario = await AgregarUsuarioAsync(context);
+        var generacionA = Guid.NewGuid();
+        var generacionB = Guid.NewGuid();
+        var loginA = await LoginGeneracionAsync(context, usuario, generacionA);
+        var loginB = await LoginGeneracionAsync(context, usuario, generacionB, CookieUnica(loginA.SetCookie));
+
+        Assert.Equal(CookieSesion.NombreDe(generacionA), NombreCookie(loginA.SetCookie));
+        Assert.Equal(CookieSesion.NombreDe(generacionB), NombreCookie(loginB.SetCookie));
+        Assert.DoesNotContain(CookieSesion.NombreDe(generacionB), loginA.SetCookie, StringComparison.Ordinal);
+        Assert.DoesNotContain(CookieSesion.Nombre, loginA.SetCookie, StringComparison.Ordinal);
+        Assert.Contains("max-age=", loginA.SetCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.InRange(MaxAge(loginA.SetCookie), 1, 14 * 24 * 3600);
+        Assert.Contains("httponly", loginA.SetCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/api/Auth", loginA.SetCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("domain=", loginA.SetCookie, StringComparison.OrdinalIgnoreCase);
+
+        var jar = new Dictionary<string, string>(StringComparer.Ordinal);
+        Aplicar(jar, loginB.SetCookie);
+        var valorB = jar[CookieSesion.NombreDe(generacionB)];
+        Aplicar(jar, loginA.SetCookie);
+        Assert.Equal(valorB, jar[CookieSesion.NombreDe(generacionB)]);
+        Assert.Equal(ValorCookie(loginA.SetCookie), jar[CookieSesion.NombreDe(generacionA)]);
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginA.Body.Token)));
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginB.Body.Token)));
+        Assert.Equal(generacionA, (await FilaVigenteAsync(context, Sid(loginA.Body.Token))).Generacion);
+        Assert.Equal(generacionB, (await FilaVigenteAsync(context, Sid(loginB.Body.Token))).Generacion);
+    }
+
+    [Fact]
+    public async Task RefreshTardioDeA_ConservaCookieYSesionDeB()
+    {
+        await using var context = CrearMemoria();
+        var usuario = await AgregarUsuarioAsync(context);
+        var generacionA = Guid.NewGuid();
+        var generacionB = Guid.NewGuid();
+        var loginA = await LoginGeneracionAsync(context, usuario, generacionA);
+        var loginB = await LoginGeneracionAsync(context, usuario, generacionB);
+        var http = HttpGeneracion(generacionA, Ambas(loginA.SetCookie, loginB.SetCookie));
+        var controller = Controlador(context, http);
+
+        var refresh = await controller.Refresh();
+
+        Assert.IsType<OkObjectResult>(refresh);
+        var setCookie = Assert.Single(http.Response.Headers.SetCookie.ToArray());
+        Assert.Equal(CookieSesion.NombreDe(generacionA), NombreCookie(setCookie!));
+        Assert.DoesNotContain(CookieSesion.NombreDe(generacionB), setCookie, StringComparison.Ordinal);
+        var jar = new Dictionary<string, string>(StringComparer.Ordinal);
+        Aplicar(jar, loginA.SetCookie);
+        Aplicar(jar, loginB.SetCookie);
+        var valorB = jar[CookieSesion.NombreDe(generacionB)];
+        Aplicar(jar, setCookie!);
+        Assert.Equal(valorB, jar[CookieSesion.NombreDe(generacionB)]);
+        Assert.NotEqual(ValorCookie(loginA.SetCookie), jar[CookieSesion.NombreDe(generacionA)]);
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginB.Body.Token)));
+        var familiaA = Guid.Parse(Sid(loginA.Body.Token));
+        var familiaB = Guid.Parse(Sid(loginB.Body.Token));
+        Assert.Equal(1, await context.RefreshToken.CountAsync(r => r.FamiliaId == familiaA && r.RevocadaEn == null));
+        Assert.Equal(1, await context.RefreshToken.CountAsync(r => r.FamiliaId == familiaB && r.RevocadaEn == null && r.ReemplazadaPorId == null));
+        Assert.Equal(generacionA, (await context.RefreshToken.SingleAsync(r => r.FamiliaId == familiaA && r.RevocadaEn == null)).Generacion);
+    }
+
+    [Fact]
+    public async Task CierreYRechazoTardiosDeA_ConservanCookieYSesionDeB()
+    {
+        await using var context = CrearMemoria();
+        var usuario = await AgregarUsuarioAsync(context);
+        var generacionA = Guid.NewGuid();
+        var generacionB = Guid.NewGuid();
+        var loginA = await LoginGeneracionAsync(context, usuario, generacionA);
+        var loginB = await LoginGeneracionAsync(context, usuario, generacionB);
+        var http = HttpGeneracion(generacionA, Ambas(loginA.SetCookie, loginB.SetCookie));
+        var controller = Controlador(context, http);
+
+        var cierre = await controller.CerrarSesion();
+
+        Assert.IsType<NoContentResult>(cierre);
+        var borrada = Assert.Single(http.Response.Headers.SetCookie.ToArray());
+        Assert.Equal(CookieSesion.NombreDe(generacionA), NombreCookie(borrada!));
+        Assert.DoesNotContain(CookieSesion.NombreDe(generacionB), borrada, StringComparison.Ordinal);
+        var jar = new Dictionary<string, string>(StringComparer.Ordinal);
+        Aplicar(jar, loginA.SetCookie);
+        Aplicar(jar, loginB.SetCookie);
+        var valorB = jar[CookieSesion.NombreDe(generacionB)];
+        Aplicar(jar, borrada!);
+        Assert.False(jar.ContainsKey(CookieSesion.NombreDe(generacionA)));
+        Assert.Equal(valorB, jar[CookieSesion.NombreDe(generacionB)]);
+        Assert.False(await MiddlewareSigueAsync(context, usuario, Sid(loginA.Body.Token)));
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginB.Body.Token)));
+
+        var otraA = Guid.NewGuid();
+        var otraB = Guid.NewGuid();
+        var primera = await LoginGeneracionAsync(context, usuario, otraA);
+        var renovada = await RenovarAsync(context, usuario, otraA, primera.SetCookie);
+        var segunda = await LoginGeneracionAsync(context, usuario, otraB);
+        var rechazo = HttpGeneracion(otraA, Ambas(primera.SetCookie, segunda.SetCookie));
+        var resultado = await Controlador(context, rechazo).Refresh();
+        Assert.IsType<UnauthorizedObjectResult>(resultado);
+        var limpieza = Assert.Single(rechazo.Response.Headers.SetCookie.ToArray());
+        Assert.Equal(CookieSesion.NombreDe(otraA), NombreCookie(limpieza!));
+        Assert.DoesNotContain(CookieSesion.NombreDe(otraB), limpieza, StringComparison.Ordinal);
+        jar.Clear();
+        Aplicar(jar, renovada);
+        Aplicar(jar, segunda.SetCookie);
+        valorB = jar[CookieSesion.NombreDe(otraB)];
+        Aplicar(jar, limpieza!);
+        Assert.False(jar.ContainsKey(CookieSesion.NombreDe(otraA)));
+        Assert.Equal(valorB, jar[CookieSesion.NombreDe(otraB)]);
+        Assert.False(await MiddlewareSigueAsync(context, usuario, Sid(primera.Body.Token)));
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(segunda.Body.Token)));
+    }
+
+    [Fact]
+    public async Task EncabezadoDeBConCookieDeA_NoRenuevaNiCierraB()
+    {
+        await using var context = CrearMemoria();
+        var usuario = await AgregarUsuarioAsync(context);
+        var generacionA = Guid.NewGuid();
+        var generacionB = Guid.NewGuid();
+        var loginA = await LoginGeneracionAsync(context, usuario, generacionA);
+        var loginB = await LoginGeneracionAsync(context, usuario, generacionB);
+        var http = HttpGeneracion(generacionB, CookieUnica(loginA.SetCookie));
+        var controller = Controlador(context, http);
+
+        var refresh = await controller.Refresh();
+
+        Assert.IsType<UnauthorizedObjectResult>(refresh);
+        Assert.Empty(http.Response.Headers.SetCookie.ToArray());
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginA.Body.Token)));
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginB.Body.Token)));
+
+        var cierre = HttpGeneracion(generacionB, CookieUnica(loginA.SetCookie));
+        var cerrado = await Controlador(context, cierre).CerrarSesion();
+        Assert.IsType<NoContentResult>(cerrado);
+        Assert.Empty(cierre.Response.Headers.SetCookie.ToArray());
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginA.Body.Token)));
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginB.Body.Token)));
+
+        var cruzado = HttpGeneracion(generacionB, CookieSesion.NombreDe(generacionB) + "=" + ValorCookie(loginA.SetCookie));
+        var cruce = await Controlador(context, cruzado).Refresh();
+        Assert.IsType<UnauthorizedObjectResult>(cruce);
+        Assert.Empty(cruzado.Response.Headers.SetCookie.ToArray());
+        Assert.Null((await FilaVigenteAsync(context, Sid(loginA.Body.Token))).ReemplazadaPorId);
+        Assert.Null((await FilaVigenteAsync(context, Sid(loginA.Body.Token))).RevocadaEn);
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginB.Body.Token)));
+    }
+
+    [Fact]
+    public async Task GeneracionMalformadaCookieAusenteYEncabezadoAusente_TienenResultadosDistintos()
+    {
+        await using var context = CrearMemoria();
+        var usuario = await AgregarUsuarioAsync(context);
+        var malformada = Http(tradicional: false);
+        malformada.Request.Headers[GeneracionSesion.Encabezado] = "no-es-uuid";
+        var rechazo = await Controlador(context, malformada).Login(new LoginRequestDto { Email = usuario.Correo, Password = Clave });
+        Assert.IsType<ObjectResult>(rechazo);
+        Assert.Equal(StatusCodes.Status403Forbidden, ((ObjectResult)rechazo).StatusCode);
+        Assert.Empty(malformada.Response.Headers.SetCookie.ToArray());
+        Assert.Equal(0, await context.RefreshToken.CountAsync());
+
+        var sinSolicitud = Http(tradicional: true);
+        sinSolicitud.Request.Headers[GeneracionSesion.Encabezado] = Guid.NewGuid().ToString("D");
+        var caida = await Controlador(context, sinSolicitud).Login(new LoginRequestDto { Email = usuario.Correo, Password = Clave });
+        Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(caida).StatusCode);
+        Assert.Equal(0, await context.RefreshToken.CountAsync());
+
+        var generacionA = Guid.NewGuid();
+        var generacionB = Guid.NewGuid();
+        var loginA = await LoginGeneracionAsync(context, usuario, generacionA);
+        var loginB = await LoginGeneracionAsync(context, usuario, generacionB);
+        var repetida = HttpGeneracion(generacionA);
+        var segundaVez = await Controlador(context, repetida).Login(new LoginRequestDto { Email = usuario.Correo, Password = Clave });
+        Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(segundaVez).StatusCode);
+        Assert.Empty(repetida.Response.Headers.SetCookie.ToArray());
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginA.Body.Token)));
+
+        var ausente = HttpGeneracion(generacionB);
+        var refreshAusente = await Controlador(context, ausente).Refresh();
+        Assert.IsType<UnauthorizedObjectResult>(refreshAusente);
+        Assert.Empty(ausente.Response.Headers.SetCookie.ToArray());
+        var cierreAusente = HttpGeneracion(generacionB);
+        var cerrado = await Controlador(context, cierreAusente).CerrarSesion();
+        Assert.IsType<NoContentResult>(cerrado);
+        Assert.Empty(cierreAusente.Response.Headers.SetCookie.ToArray());
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginA.Body.Token)));
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid(loginB.Body.Token)));
+
+        var legado = Http(tradicional: false);
+        var loginLegado = await Controlador(context, legado).Login(new LoginRequestDto { Email = usuario.Correo, Password = Clave });
+        Assert.IsType<OkObjectResult>(loginLegado);
+        var cookieLegada = Assert.Single(legado.Response.Headers.SetCookie.ToArray());
+        Assert.Contains("cf_refresh=", cookieLegada, StringComparison.Ordinal);
+        Assert.DoesNotContain("cf_g_", cookieLegada, StringComparison.Ordinal);
+        Assert.Null((await context.RefreshToken.SingleAsync(r => r.Generacion == null && r.RevocadaEn == null)).Generacion);
+    }
+
+    private async Task<(AuthResponseDto Body, string SetCookie)> LoginGeneracionAsync(
+        AppDbContext context,
+        Usuario usuario,
+        Guid generacion,
+        string? cookie = null)
+    {
+        var http = HttpGeneracion(generacion, cookie);
+        var result = await Controlador(context, http).Login(new LoginRequestDto { Email = usuario.Correo, Password = Clave });
+        var body = Assert.IsType<AuthResponseDto>(Assert.IsType<OkObjectResult>(result).Value);
+        return (body, Assert.Single(http.Response.Headers.SetCookie.ToArray())!);
+    }
+
+    private async Task<string> RenovarAsync(AppDbContext context, Usuario usuario, Guid generacion, string setCookie)
+    {
+        var http = HttpGeneracion(generacion, CookieUnica(setCookie));
+        var result = await Controlador(context, http).Refresh();
+        Assert.IsType<OkObjectResult>(result);
+        Assert.True(await MiddlewareSigueAsync(context, usuario, Sid((Assert.IsType<AuthResponseDto>(Assert.IsType<OkObjectResult>(result).Value)).Token)));
+        return Assert.Single(http.Response.Headers.SetCookie.ToArray())!;
+    }
+
+    private static DefaultHttpContext HttpGeneracion(Guid generacion, string? cookie = null)
+    {
+        var http = Http(tradicional: false);
+        http.Request.Headers[GeneracionSesion.Encabezado] = generacion.ToString("D");
+        if (cookie != null)
+            http.Request.Headers.Cookie = cookie;
+
+        return http;
+    }
+
+    private static string CookieUnica(string setCookie)
+    {
+        return NombreCookie(setCookie) + "=" + ValorCookie(setCookie);
+    }
+
+    private static string Ambas(string primera, string segunda)
+    {
+        return CookieUnica(primera) + "; " + CookieUnica(segunda);
+    }
+
+    private static string NombreCookie(string setCookie)
+    {
+        var par = setCookie.Split(';')[0];
+        return par[..par.IndexOf('=')].Trim();
+    }
+
+    private static string ValorCookie(string setCookie)
+    {
+        var par = setCookie.Split(';')[0];
+        return par[(par.IndexOf('=') + 1)..].Trim();
+    }
+
+    private static int MaxAge(string setCookie)
+    {
+        const string marca = "max-age=";
+        var inicio = setCookie.IndexOf(marca, StringComparison.OrdinalIgnoreCase);
+        Assert.True(inicio >= 0);
+        inicio += marca.Length;
+        var fin = inicio;
+        while (fin < setCookie.Length && char.IsDigit(setCookie[fin]))
+            fin++;
+
+        return int.Parse(setCookie[inicio..fin]);
+    }
+
+    private static void Aplicar(Dictionary<string, string> jar, string setCookie)
+    {
+        var nombre = NombreCookie(setCookie);
+        var baja = ValorCookie(setCookie).Length == 0
+            || setCookie.Contains("max-age=0", StringComparison.OrdinalIgnoreCase)
+            || setCookie.Contains("1970", StringComparison.Ordinal);
+        if (baja)
+            jar.Remove(nombre);
+        else
+            jar[nombre] = ValorCookie(setCookie);
+    }
+
+    private static string Sid(string token)
+    {
+        return Leer(token).Claims.Single(c => c.Type == "sid").Value;
+    }
+
+    private static async Task<RefreshToken> FilaVigenteAsync(AppDbContext context, string sid)
+    {
+        var familia = Guid.Parse(sid);
+        return await context.RefreshToken.SingleAsync(r => r.FamiliaId == familia && r.RevocadaEn == null && r.ReemplazadaPorId == null);
     }
 
     private static async Task<bool> MiddlewareSigueAsync(AppDbContext context, Usuario usuario, string? sid)

@@ -211,8 +211,41 @@ confirmar la fila. Es `HttpOnly`, de host, con `Path=/api/Auth`. `Auth:CookieSam
 vale `Lax` por defecto. `Auth:CookieSecure` es opcional: sin valor, `Secure`
 queda apagado solo en Development sobre HTTP. `SameSite=None` fuerza `Secure`.
 El borrado usa el mismo nombre, `Path` y omite `Domain`, igual que la creación.
+El vencimiento que recibe el navegador es el `ExpiraEn` del refresh, con tope de
+`Jwt:RefreshExpireDays`, y también se envía `Max-Age`.
 
-Si ese login presenta una cookie de una familia del mismo usuario, esa familia
+### Cookie por generación
+
+Si no llega `X-CF-Generacion`, sigue el modo anterior y la cookie es `cf_refresh`.
+Si el encabezado llega, tiene que ser un UUID canónico de 36 caracteres, con
+guiones. Un valor presente y mal formado responde `403` y no vuelve al modo
+anterior ni escribe cookies. Este modo también exige `X-CF-Solicitud: 1` y un
+origen permitido. Cada login renovable usa una generación nueva. Si esa
+generación ya está asociada a una familia, responde `403` y no emite otra cookie.
+
+El nombre de la cookie sale de la generación: `cf_g_` más los 32 hexadecimales
+del UUID. El identificador no autentica y no reemplaza al refresh token. Se
+guarda en `RefreshToken.Generacion`, que queda nulo en las familias del modo
+anterior. No hace falta otra tabla. Una base que ya aplicó
+`20261103_autenticacion_seguridad.sql` agrega la columna con
+`database/20261104_sesion_generacion.sql`. Ese script no borra filas ni cookies.
+
+Refresh y cierre leen solo la cookie de la generación pedida y comprueban que
+el token pertenezca a una familia con esa misma generación. Si esa cookie no
+está, no se busca otra. Una respuesta solo crea, reemplaza o borra la cookie de
+su generación. Por eso un `Set-Cookie` tardío de una generación anterior no
+pisa ni borra la cookie de un login posterior. No se usa una comprobación de
+“generación vigente” como sustituto: una vez enviada la respuesta, el navegador
+igual aplicaría ese `Set-Cookie`.
+
+El cierre de una generación no borra cookies de las demás. El login nuevo
+tampoco las borra ni revoca esas familias. La familia que queda sin uso sigue
+hasta su inactividad, su plazo absoluto, el cierre de su propia generación, la
+reutilización de su token o un cambio de `TokenVersion`. No hay una limpieza
+global: borraría o pisaría la sesión posterior. La cookie abandonada vence sola
+en el navegador, al `Max-Age` con el que se escribió.
+
+Si ese login no trae `X-CF-Generacion` y presenta una cookie de una familia del mismo usuario, esa familia
 se revoca en la misma operación y las demás sesiones siguen. Un login fallido
 no revoca la anterior. El alta tradicional, el bootstrap y `Auth/agente` no
 crean familias ni cookies. El access de la sesión nueva lleva `sid` y

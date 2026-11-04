@@ -51,6 +51,7 @@ namespace ControlFichajes.API.Data
                 .OnDelete(DeleteBehavior.Cascade);
             modelBuilder.Entity<RefreshToken>().HasIndex(r => r.TokenHash).IsUnique();
             modelBuilder.Entity<RefreshToken>().HasIndex(r => r.FamiliaId);
+            modelBuilder.Entity<RefreshToken>().HasIndex(r => r.Generacion);
             modelBuilder.Entity<RefreshToken>()
                 .HasOne(r => r.Usuario)
                 .WithMany()

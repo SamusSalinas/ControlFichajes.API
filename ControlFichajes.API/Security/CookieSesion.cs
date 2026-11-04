@@ -28,17 +28,29 @@ public static class CookieSesion
         return !(desarrollo && !https);
     }
 
-    public static void Escribir(HttpResponse response, string token, DateTime expiraEn, bool secure, SameSiteMode sameSite)
+    public static string NombreDe(Guid generacion)
     {
-        response.Cookies.Append(Nombre, token, Opciones(secure, sameSite, expiraEn));
+        return "cf_g_" + generacion.ToString("N");
     }
 
-    public static void Borrar(HttpResponse response, bool secure, SameSiteMode sameSite)
+    public static void Escribir(
+        HttpResponse response,
+        string nombre,
+        string token,
+        DateTime expiraEn,
+        bool secure,
+        SameSiteMode sameSite,
+        TimeSpan tope)
     {
-        response.Cookies.Delete(Nombre, Opciones(secure, sameSite, null));
+        response.Cookies.Append(nombre, token, Opciones(secure, sameSite, expiraEn, tope));
     }
 
-    private static CookieOptions Opciones(bool secure, SameSiteMode sameSite, DateTime? expiraEn)
+    public static void Borrar(HttpResponse response, string nombre, bool secure, SameSiteMode sameSite)
+    {
+        response.Cookies.Delete(nombre, Opciones(secure, sameSite, null, TimeSpan.Zero));
+    }
+
+    private static CookieOptions Opciones(bool secure, SameSiteMode sameSite, DateTime? expiraEn, TimeSpan tope)
     {
         var opciones = new CookieOptions
         {
@@ -49,9 +61,18 @@ public static class CookieSesion
             IsEssential = true
         };
 
-        if (expiraEn.HasValue)
-            opciones.Expires = new DateTimeOffset(DateTime.SpecifyKind(expiraEn.Value, DateTimeKind.Utc));
+        if (!expiraEn.HasValue)
+            return opciones;
 
+        var ahora = DateTime.UtcNow;
+        var vida = DateTime.SpecifyKind(expiraEn.Value, DateTimeKind.Utc) - ahora;
+        if (vida < TimeSpan.Zero)
+            vida = TimeSpan.Zero;
+        if (tope > TimeSpan.Zero && vida > tope)
+            vida = tope;
+
+        opciones.MaxAge = vida;
+        opciones.Expires = new DateTimeOffset(ahora.Add(vida));
         return opciones;
     }
 }

@@ -63,15 +63,22 @@ namespace ControlFichajes.API.Controllers
                 return await LoginTradicionalAsync(request);
 
             SinCache();
+            var generacion = GeneracionSesion.Leer(Request);
+            if (generacion.Estado == EstadoGeneracionSesion.Invalida)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
             var clase = ProteccionSolicitudSesion.Evaluar(Request, _configuration);
             if (clase == ClaseSolicitudSesion.Rechazada)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            if (generacion.Estado == EstadoGeneracionSesion.Valida && clase != ClaseSolicitudSesion.Renovable)
                 return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
 
             var response = await LoginTradicionalAsync(request);
             if (clase == ClaseSolicitudSesion.Tradicional || response is not OkObjectResult ok)
                 return response;
 
-            return await EmitirSesionAsync((AuthResponseDto)ok.Value!);
+            return await EmitirSesionAsync((AuthResponseDto)ok.Value!, generacion);
         }
 
         [HttpPost("refresh")]
@@ -80,25 +87,34 @@ namespace ControlFichajes.API.Controllers
         public async Task<IActionResult> Refresh()
         {
             SinCache();
+            var generacion = GeneracionSesion.Leer(Request);
+            if (generacion.Estado == EstadoGeneracionSesion.Invalida)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
             if (ProteccionSolicitudSesion.Evaluar(Request, _configuration) != ClaseSolicitudSesion.Renovable)
                 return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
 
             if (_sesiones == null)
                 return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo renovar la sesión." });
 
-            var resultado = await _sesiones.RotarAsync(Request.Cookies[CookieSesion.Nombre], Ip(), AgenteUsuario());
+            var nombre = NombreCookie(generacion);
+            var resultado = await _sesiones.RotarAsync(
+                Request.Cookies[nombre],
+                Ip(),
+                AgenteUsuario(),
+                IdGeneracion(generacion));
             if (resultado.Estado == EstadoSesionWeb.Error)
                 return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo renovar la sesión." });
 
             if (resultado.Estado != EstadoSesionWeb.Rotada || resultado.Respuesta == null || resultado.Refresh == null || resultado.ExpiraEn == null)
             {
                 if (resultado.Estado == EstadoSesionWeb.Reutilizada)
-                    BorrarCookie();
+                    BorrarCookie(nombre);
 
                 return Unauthorized(new { mensaje = "Sesión inválida." });
             }
 
-            EscribirCookie(resultado.Refresh, resultado.ExpiraEn.Value);
+            EscribirCookie(nombre, resultado.Refresh, resultado.ExpiraEn.Value);
             return Ok(resultado.Respuesta);
         }
 
@@ -108,17 +124,28 @@ namespace ControlFichajes.API.Controllers
         public async Task<IActionResult> CerrarSesion()
         {
             SinCache();
+            var generacion = GeneracionSesion.Leer(Request);
+            if (generacion.Estado == EstadoGeneracionSesion.Invalida)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
             if (ProteccionSolicitudSesion.Evaluar(Request, _configuration) != ClaseSolicitudSesion.Renovable)
                 return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
 
             if (_sesiones == null)
                 return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo cerrar la sesión." });
 
-            var resultado = await _sesiones.CerrarAsync(Request.Cookies[CookieSesion.Nombre]);
+            var nombre = NombreCookie(generacion);
+            var presente = Request.Cookies[nombre];
+            var resultado = await _sesiones.CerrarAsync(presente, IdGeneracion(generacion));
             if (resultado.Estado == EstadoSesionWeb.Error)
                 return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo cerrar la sesión." });
 
-            BorrarCookie();
+            if (resultado.Estado == EstadoSesionWeb.Rechazada)
+                return Unauthorized(new { mensaje = "Sesión inválida." });
+
+            if (generacion.Estado != EstadoGeneracionSesion.Valida || presente != null)
+                BorrarCookie(nombre);
+
             return NoContent();
         }
 
@@ -236,17 +263,34 @@ namespace ControlFichajes.API.Controllers
             return Ok(response);
         }
 
-        private async Task<IActionResult> EmitirSesionAsync(AuthResponseDto response)
+        private async Task<IActionResult> EmitirSesionAsync(AuthResponseDto response, LecturaGeneracionSesion generacion)
         {
             if (_sesiones == null || !TryLeerUsuarioId(response.Token, out var usuarioId))
                 return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo iniciar la sesión." });
 
-            var resultado = await _sesiones.EmitirAsync(usuarioId, Request.Cookies[CookieSesion.Nombre], Ip(), AgenteUsuario());
+            var identificador = IdGeneracion(generacion);
+            var anterior = identificador.HasValue ? null : Request.Cookies[CookieSesion.Nombre];
+            var resultado = await _sesiones.EmitirAsync(usuarioId, anterior, Ip(), AgenteUsuario(), identificador);
+            if (identificador.HasValue && resultado.Estado == EstadoSesionWeb.Rechazada)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
             if (resultado.Estado != EstadoSesionWeb.Emitida || resultado.Refresh == null || resultado.ExpiraEn == null || resultado.Respuesta == null)
                 return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo iniciar la sesión." });
 
-            EscribirCookie(resultado.Refresh, resultado.ExpiraEn.Value);
+            EscribirCookie(NombreCookie(generacion), resultado.Refresh, resultado.ExpiraEn.Value);
             return Ok(resultado.Respuesta);
+        }
+
+        private static Guid? IdGeneracion(LecturaGeneracionSesion generacion)
+        {
+            return generacion.Estado == EstadoGeneracionSesion.Valida ? generacion.Valor : null;
+        }
+
+        private static string NombreCookie(LecturaGeneracionSesion generacion)
+        {
+            return generacion.Estado == EstadoGeneracionSesion.Valida
+                ? CookieSesion.NombreDe(generacion.Valor)
+                : CookieSesion.Nombre;
         }
 
         private static bool TryLeerUsuarioId(string token, out int usuarioId)
@@ -261,14 +305,21 @@ namespace ControlFichajes.API.Controllers
             return claim != null && int.TryParse(claim.Value, out usuarioId) && usuarioId > 0;
         }
 
-        private void EscribirCookie(string refresh, DateTime expiraEn)
+        private void EscribirCookie(string nombre, string refresh, DateTime expiraEn)
         {
-            CookieSesion.Escribir(Response, refresh, expiraEn, CookieSecure(), CookieSesion.Modo(_configuration));
+            CookieSesion.Escribir(
+                Response,
+                nombre,
+                refresh,
+                expiraEn,
+                CookieSecure(),
+                CookieSesion.Modo(_configuration),
+                TimeSpan.FromDays(AuthPolicy.RefreshExpireDays(_configuration)));
         }
 
-        private void BorrarCookie()
+        private void BorrarCookie(string nombre)
         {
-            CookieSesion.Borrar(Response, CookieSecure(), CookieSesion.Modo(_configuration));
+            CookieSesion.Borrar(Response, nombre, CookieSecure(), CookieSesion.Modo(_configuration));
         }
 
         private bool CookieSecure()

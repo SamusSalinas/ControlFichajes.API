@@ -10,7 +10,8 @@ Comprobado antes de escribir esta documentación:
 
 - Rama: `feat/autenticacion-segura`.
 - Commit funcional de la etapa 5B: `0aa14677401352349bcc06deed76c8fd3e72950e`.
-- La etapa 6A queda en el mismo commit que esta actualización. Su padre es `9e8fc5df290c894180cfb50708ef57033e33b671`.
+- La etapa 6A es `e5df9ba2e5f55326faf07e52046c2ea933442377`. Su padre es `9e8fc5df290c894180cfb50708ef57033e33b671`.
+- La etapa 6A.1 queda en el commit que actualiza este documento. Su padre es `e5df9ba2e5f55326faf07e52046c2ea933442377`.
 - Árbol limpio.
 - `git rev-parse '@{upstream}'` respondió `fatal: no upstream configured for branch 'feat/autenticacion-segura'`.
 - No hay remoto configurado para esta rama. No se hizo push, fetch, pull, merge ni rebase en este cierre.
@@ -30,7 +31,8 @@ Todas quedaron en commits locales. El usuario las declaró aprobadas y respaldad
 | 4. Invitación por correo | `35653c7f3cbf52b4c8cb2e9a0c4201fba53772d1` | `feat: invita usuarios por correo sin entregar el token` |
 | 5A. Aceptación y contraseña | `c3dad96096fc205e008c86a493f2cd092508b09a` | `feat: acepta la invitación y deja la contraseña elegida sin iniciar sesión` |
 | 5B. Recuperación | `0aa14677401352349bcc06deed76c8fd3e72950e` | `feat: recupera la contraseña por correo sin iniciar sesión` |
-| 6A. Refresh rotativo | este commit | ver el mensaje del commit |
+| 6A. Refresh rotativo | `e5df9ba2e5f55326faf07e52046c2ea933442377` | `feat: rota la sesión web y la revoca al cierre` |
+| 6A.1. Cookie por generación | este commit | ver el mensaje del commit |
 
 La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b622662c36a4ebaffc9253eadd1834dfe`, ya no es el HEAD de la etapa: el hash vigente es `35653c7`. El padre sigue siendo `91ad7ba`.
 
@@ -197,16 +199,30 @@ La suite con la exclusión ya documentada, después de esta etapa, dejó 415 cor
 
 La comprobación manual usó MySQL local en `127.0.0.1:3308` y la API en `127.0.0.1:5088`, con un usuario ficticio. El login sin encabezado respondió `200` sin cookie y sin `sid`. El encabezado distinto de `1`, el origen ajeno y el origen `null` respondieron `403` sin filas nuevas ni cookie. El login renovable respondió `200` con `sid`, `Cache-Control: no-store` y cookie `HttpOnly`, `Path=/api/Auth`, `SameSite=Lax`, sin `Domain` ni `Secure`. El cierre respondió `204`, dejó en `401` el JWT de esa sesión y en pie la otra. El refresh siguiente respondió `200`; repetir la cookie consumida respondió `401` y esa familia quedó revocada. Dos procesos simultáneos respondieron `200` y `401`, y la familia nueva quedó revocada. El preflight permitido respondió `204` con credenciales; el origen rechazado no recibió `Access-Control-Allow-Origin`. El límite de refresh respondió `429` al agotar 30 solicitudes en la ventana. Un JWT sin `sid` siguió llegando al cambio de contraseña. Los logs de la API no contenían la contraseña, la cookie ni `Bearer`. La auditoría guardó los eventos de sesión con detalle `cierre` o `reutilizacion`, sin el token.
 
+## Etapa 6A.1
+
+Aísla la cookie por generación. El padre es `e5df9ba2e5f55326faf07e52046c2ea933442377`. No se tocó el frontend ni se acortó el access token.
+
+`X-CF-Generacion` es opcional. Si no llega, el modo de la etapa 6A sigue igual y la cookie es `cf_refresh`. Si llega, tiene que ser un solo UUID canónico de 36 caracteres, con guiones. Junto con `X-CF-Solicitud: 1` y un `Origin` permitido, el login renovable asocia esa generación a la familia nueva y escribe solo `cf_g_` más los 32 hexadecimales. El identificador no autentica y no reemplaza al refresh token. Un valor presente y mal formado responde `403` y no cae al modo anterior. Repetir una generación ya asociada también responde `403`. Refresh y cierre leen únicamente esa cookie y exigen que el token pertenezca a la familia de esa generación. Si falta, no buscan otra. Cada respuesta crea, reemplaza o borra solo su propio nombre.
+
+La columna es `RefreshToken.Generacion`, `char(36)` nula, con índice `IX_RefreshToken_Generacion`. El modelo la lee como `Guid?`. Las familias del modo anterior quedan con el valor nulo. No hay otra tabla. El script versionado es `database/20261104_sesion_generacion.sql`: agrega la columna solo si falta y no borra filas. El esquema limpio y el incremental del 3 de noviembre también la incluyen. En MySQL local, `127.0.0.1:3308`, la columna quedó `char(36)`, nullable e indexada, y los valores nuevos tienen 36 caracteres.
+
+La cookie lleva `HttpOnly`, `Path=/api/Auth`, `SameSite` y `Max-Age` acotado a `ExpiraEn`, con tope de `Jwt:RefreshExpireDays`. El cierre de una generación no borra las otras cookies. Un login nuevo no revoca las otras familias. La familia huérfana sigue hasta su inactividad, su plazo absoluto, su propio cierre, una reutilización o un cambio de `TokenVersion`.
+
+La comprobación usó `System.Net.CookieContainer.SetCookies` contra la API reemplazada en `http://127.0.0.1:5088`, con el usuario ficticio de la etapa 6A. El jar aplicó el `Set-Cookie` de A después del de B y conservó la cookie y la sesión de B. Lo mismo ocurrió con el refresh tardío, el cierre tardío y el rechazo por reutilización de A. El encabezado de B con la cookie de A no renovó ni cerró. La generación malformada respondió `403` sin cookie. La cookie pedida y ausente dejó el refresh en `401` sin buscar otra. El modo `cf_refresh` renovó y su cierre no borró la cookie de generación. El login tradicional respondió `200` sin cookie y sin `sid`. Los logs de esa instancia no contenían la cookie, el token ni `Bearer`.
+
+La suite con la exclusión ya documentada, sobre este código, dejó 421 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas. No se habilitó `CFB_PRODUCTION_TEST_OPT_IN` ni `CFB_LOCAL_TEST_API_BASE_URL`. La advertencia `NU1902` de `MySqlConnector` 2.4.0 sigue igual.
+
 ## Próximo paso
 
-Revisar la etapa 6A. No integrar el frontend, no bajar la duración del access token y no generar un bundle hasta esa revisión.
+La etapa 6A.1 queda commiteada y comprobada en local. No integrar el frontend, no bajar la duración del access token y no generar un bundle. No avanzar a otra etapa hasta esa revisión.
 
 ## Texto para una conversación nueva
 
 ```text
 Leé api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md.
 Después comprobá el estado real: rama, git status, git rev-parse HEAD y git rev-parse '@{upstream}'.
-No continúes si la rama, el commit o el árbol no coinciden con el documento.
-La etapa 6A ya está implementada en el commit local que actualiza este documento. El padre es 9e8fc5df290c894180cfb50708ef57033e33b671.
-No integres el frontend, no bajes la duración del access token y no generes un bundle hasta la revisión.
+No continúes si la rama no es `feat/autenticacion-segura` o si el árbol no está limpio. No hay upstream.
+La etapa 6A es e5df9ba2e5f55326faf07e52046c2ea933442377. La etapa 6A.1, cookie por generación, es el commit que actualiza este documento.
+No integres el frontend, no bajes la duración del access token, no generes un bundle y no avances a otra etapa.
 ```

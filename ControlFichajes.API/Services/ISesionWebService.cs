@@ -32,15 +32,18 @@ public interface ISesionWebService
         string? refreshAnterior,
         string? ip,
         string? userAgent,
+        Guid? generacion = null,
         CancellationToken cancellationToken = default);
 
     Task<ResultadoSesionWeb> RotarAsync(
         string? refresh,
         string? ip,
         string? userAgent,
+        Guid? generacion = null,
         CancellationToken cancellationToken = default);
 
     Task<ResultadoSesionWeb> CerrarAsync(
         string? refresh,
+        Guid? generacion = null,
         CancellationToken cancellationToken = default);
 }

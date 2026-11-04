@@ -30,4 +30,6 @@ public class RefreshToken
     public string? UserAgent { get; set; }
 
     public int TokenVersion { get; set; }
+
+    public Guid? Generacion { get; set; }
 }

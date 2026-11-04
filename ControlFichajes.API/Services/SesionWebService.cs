@@ -33,8 +33,12 @@ public sealed class SesionWebService : ISesionWebService
         string? refreshAnterior,
         string? ip,
         string? userAgent,
+        Guid? generacion = null,
         CancellationToken cancellationToken = default)
     {
+        if (generacion.HasValue)
+            refreshAnterior = null;
+
         var hashAnterior = HashSiHay(refreshAnterior);
         int? otroUsuario = null;
         Guid? otraFamilia = null;
@@ -68,12 +72,15 @@ public sealed class SesionWebService : ISesionWebService
             if (!usuario.Activo)
                 return new ResultadoSesionWeb { Estado = EstadoSesionWeb.Rechazada };
 
+            if (generacion.HasValue && await _context.RefreshToken.AnyAsync(r => r.Generacion == generacion, cancellationToken))
+                return new ResultadoSesionWeb { Estado = EstadoSesionWeb.Rechazada };
+
             var reemplazo = false;
             if (hashAnterior != null && !otroUsuario.HasValue)
             {
                 var previa = await _context.RefreshToken
                     .SingleOrDefaultAsync(r => r.TokenHash == hashAnterior, cancellationToken);
-                if (previa != null && previa.UsuarioId == usuario.Id)
+                if (previa != null && previa.UsuarioId == usuario.Id && previa.Generacion == null)
                 {
                     await RevocacionSesiones.MarcarFamiliaAsync(_context, usuario.Id, previa.FamiliaId, DateTime.UtcNow, cancellationToken);
                     reemplazo = true;
@@ -82,7 +89,7 @@ public sealed class SesionWebService : ISesionWebService
 
             var ahora = DateTime.UtcNow;
             var creada = ahora;
-            var fila = NuevaFila(usuario, creada, creada, ip, userAgent, out var refresh);
+            var fila = NuevaFila(usuario, creada, creada, ip, userAgent, generacion, out var refresh);
             _context.RefreshToken.Add(fila);
             await _context.SaveChangesAsync(cancellationToken);
             var respuesta = Respuesta(usuario, fila.FamiliaId.ToString("D"));
@@ -108,6 +115,7 @@ public sealed class SesionWebService : ISesionWebService
         string? refresh,
         string? ip,
         string? userAgent,
+        Guid? generacion = null,
         CancellationToken cancellationToken = default)
     {
         var hash = HashSiHay(refresh);
@@ -130,6 +138,9 @@ public sealed class SesionWebService : ISesionWebService
 
             await _context.Entry(actual).ReloadAsync(cancellationToken);
             await _context.Entry(usuario).ReloadAsync(cancellationToken);
+            if (!Asociada(actual, generacion))
+                return new ResultadoSesionWeb { Estado = EstadoSesionWeb.Rechazada };
+
             var ahora = DateTime.UtcNow;
 
             if (actual.RevocadaEn != null || actual.ReemplazadaPorId != null)
@@ -149,7 +160,7 @@ public sealed class SesionWebService : ISesionWebService
             if (actual.ExpiraEn <= ahora || absoluto <= ahora)
                 return new ResultadoSesionWeb { Estado = EstadoSesionWeb.Rechazada };
 
-            var sucesor = NuevaFila(usuario, inicio, ahora, ip, userAgent, out var nuevoRefresh);
+            var sucesor = NuevaFila(usuario, inicio, ahora, ip, userAgent, actual.Generacion, out var nuevoRefresh);
             sucesor.FamiliaId = actual.FamiliaId;
             sucesor.TokenVersion = usuario.TokenVersion;
             _context.RefreshToken.Add(sucesor);
@@ -176,7 +187,10 @@ public sealed class SesionWebService : ISesionWebService
         }
     }
 
-    public async Task<ResultadoSesionWeb> CerrarAsync(string? refresh, CancellationToken cancellationToken = default)
+    public async Task<ResultadoSesionWeb> CerrarAsync(
+        string? refresh,
+        Guid? generacion = null,
+        CancellationToken cancellationToken = default)
     {
         var hash = HashSiHay(refresh);
         if (hash == null)
@@ -199,6 +213,9 @@ public sealed class SesionWebService : ISesionWebService
             }
 
             await _context.Entry(actual).ReloadAsync(cancellationToken);
+            if (!Asociada(actual, generacion))
+                return new ResultadoSesionWeb { Estado = EstadoSesionWeb.Rechazada };
+
             var revocadas = await RevocacionSesiones.MarcarFamiliaAsync(
                 _context,
                 actual.UsuarioId,
@@ -233,12 +250,18 @@ public sealed class SesionWebService : ISesionWebService
         return true;
     }
 
+    private static bool Asociada(RefreshToken fila, Guid? generacion)
+    {
+        return fila.Generacion == generacion;
+    }
+
     private RefreshToken NuevaFila(
         Usuario usuario,
         DateTime inicioFamilia,
         DateTime ahora,
         string? ip,
         string? userAgent,
+        Guid? generacion,
         out string refresh)
     {
         refresh = TokenOpaco.Crear();
@@ -250,6 +273,7 @@ public sealed class SesionWebService : ISesionWebService
             UsuarioId = usuario.Id,
             TokenHash = TokenOpaco.Hash(refresh),
             FamiliaId = Guid.NewGuid(),
+            Generacion = generacion,
             ExpiraEn = expira,
             CreadaEn = ahora,
             Ip = Cortar(ip, 64),

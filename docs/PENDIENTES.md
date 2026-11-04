@@ -2,7 +2,7 @@
 
 Autenticación, 4 de noviembre de 2026. El detalle está en `docs/CONTINUIDAD_AUTENTICACION.md`.
 
-- La etapa 6A, refresh rotativo en la API, está implementada y pendiente de revisión. No integrar el frontend ni acortar el access token antes de esa revisión.
+- La etapa 6A, refresh rotativo, está en `e5df9ba2e5f55326faf07e52046c2ea933442377`. La etapa 6A.1 aísla la cookie por generación, está comprobada en local y queda en el commit que actualiza la continuidad. No integrar el frontend, no acortar el access token y no avanzar a otra etapa.
 - MFA no está implementado.
 - Los bundles locales de 5A y 5B fueron verificados según las salidas de PowerShell aportadas por el usuario. Las rutas y los hashes están en `docs/CONTINUIDAD_AUTENTICACION.md`. La subida de ambos a Drive sigue pendiente de confirmación.
 

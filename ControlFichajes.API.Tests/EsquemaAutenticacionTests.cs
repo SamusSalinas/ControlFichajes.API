@@ -48,6 +48,7 @@ public class EsquemaAutenticacionTests
         Assert.Contains("AND `InvitadoEn` IS NULL", sql, StringComparison.Ordinal);
         Assert.Contains("AND `PasswordHash` <> ''", sql, StringComparison.Ordinal);
         Assert.Contains("ADD COLUMN `TotpHabilitado` tinyint(1) NOT NULL DEFAULT 0", sql, StringComparison.Ordinal);
+        Assert.Contains("`Generacion` char(36)", sql, StringComparison.Ordinal);
 
         foreach (var tabla in TablasNuevas)
             Assert.Contains($"`{tabla}`", sql, StringComparison.Ordinal);
@@ -75,6 +76,7 @@ public class EsquemaAutenticacionTests
         }
 
         Assert.Contains("`TotpHabilitado` tinyint(1) NOT NULL DEFAULT 0", snapshot, StringComparison.Ordinal);
+        Assert.Contains("`Generacion` char(36)", snapshot, StringComparison.Ordinal);
         Assert.DoesNotContain("Password123", snapshot, StringComparison.Ordinal);
         Assert.DoesNotContain("Password123", rollback, StringComparison.Ordinal);
     }
@@ -109,6 +111,18 @@ public class EsquemaAutenticacionTests
         Assert.DoesNotContain("PermitirBootstrap=true", appsettings, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("PermitirBootstrap: \"true\"", compose, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("PermitirBootstrap=true", compose, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generacion_SeAgregaSinRecrearLaTabla()
+    {
+        var sql = File.ReadAllText(BuscarArchivo("database", "20261104_sesion_generacion.sql"));
+
+        Assert.Contains("information_schema.COLUMNS", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN `Generacion` char(36)", sql, StringComparison.Ordinal);
+        Assert.Contains("SELECT 1", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("DROP TABLE", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM", sql, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

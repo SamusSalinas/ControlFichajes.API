@@ -248,10 +248,12 @@ CREATE TABLE `RefreshToken` (
   `Ip` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
   `UserAgent` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
   `TokenVersion` int NOT NULL,
+  `Generacion` char(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `UX_RefreshToken_TokenHash` (`TokenHash`),
   KEY `IX_RefreshToken_UsuarioId` (`UsuarioId`),
   KEY `IX_RefreshToken_FamiliaId` (`FamiliaId`),
+  KEY `IX_RefreshToken_Generacion` (`Generacion`),
   CONSTRAINT `FK_RefreshToken_Usuario_UsuarioId` FOREIGN KEY (`UsuarioId`) REFERENCES `Usuario` (`Id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
