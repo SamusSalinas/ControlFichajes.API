@@ -9,8 +9,8 @@ No había un documento de continuidad de autenticación. `docs/ESTADO_ACTUAL.md`
 Comprobado antes de escribir esta documentación:
 
 - Rama: `feat/autenticacion-segura`.
-- Commit funcional: `0aa14677401352349bcc06deed76c8fd3e72950e`.
-- Mensaje: `feat: recupera la contraseña por correo sin iniciar sesión`.
+- Commit funcional de la etapa 5B: `0aa14677401352349bcc06deed76c8fd3e72950e`.
+- La etapa 6A queda en el mismo commit que esta actualización. Su padre es `9e8fc5df290c894180cfb50708ef57033e33b671`.
 - Árbol limpio.
 - `git rev-parse '@{upstream}'` respondió `fatal: no upstream configured for branch 'feat/autenticacion-segura'`.
 - No hay remoto configurado para esta rama. No se hizo push, fetch, pull, merge ni rebase en este cierre.
@@ -30,6 +30,7 @@ Todas quedaron en commits locales. El usuario las declaró aprobadas y respaldad
 | 4. Invitación por correo | `35653c7f3cbf52b4c8cb2e9a0c4201fba53772d1` | `feat: invita usuarios por correo sin entregar el token` |
 | 5A. Aceptación y contraseña | `c3dad96096fc205e008c86a493f2cd092508b09a` | `feat: acepta la invitación y deja la contraseña elegida sin iniciar sesión` |
 | 5B. Recuperación | `0aa14677401352349bcc06deed76c8fd3e72950e` | `feat: recupera la contraseña por correo sin iniciar sesión` |
+| 6A. Refresh rotativo | este commit | ver el mensaje del commit |
 
 La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b622662c36a4ebaffc9253eadd1834dfe`, ya no es el HEAD de la etapa: el hash vigente es `35653c7`. El padre sigue siendo `91ad7ba`.
 
@@ -43,7 +44,7 @@ La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b62266
 
 `POST /api/Auth/bootstrap` responde `404` cuando `Auth:PermitirBootstrap` no está en `true`. En el `appsettings.json` versionado está en `false`.
 
-No se modificó el frontend. No se implementaron refresh ni MFA.
+No se modificó el frontend. No se implementó MFA. La etapa 6A agrega la sesión web renovable en la API. El access token sigue en `Jwt:ExpireMinutes`.
 
 ## Endpoints de esta rama
 
@@ -176,9 +177,29 @@ Trabajar solo en local y con datos ficticios. MySQL en `127.0.0.1:3308`, API en 
 
 No hacer push, fetch, pull, merge ni rebase. No configurar upstream ni recrear la rama remota. No interactuar con GitHub ni con producción. No usar credenciales ni correos reales. No modificar el frontend. No commitear `appsettings.Development.local.json` ni secretos. No guardar en documentación ni en logs tokens, contraseñas, enlaces ni cuerpos de correo.
 
+## Etapa 6A
+
+Implementada en la API y pendiente de revisión. No se tocó el frontend ni se acortó el access token. No hubo migración: se reutiliza `RefreshToken`. `FamiliaId` sigue en `char(36)` y el modelo lo lee como `Guid`, porque el conector devuelve un identificador para esa columna.
+
+`POST /api/Auth/Login` sin `X-CF-Solicitud` mantiene `token`, `mensaje` y `requiereCambioPassword`, sin familia ni cookie. Si el encabezado está y no vale `1`, responde `403` y no entra al login. Con el valor `1` exige un `Origin` de `Cors:AllowedOrigins`. `Origin` ausente, vacío, `null` o rechazado responde `403` antes de modificar filas o cookies. La cookie `cf_refresh` sale solo después de autenticar y confirmar. Es `HttpOnly`, de host y `Path=/api/Auth`. El borrado usa el mismo nombre y `Path`, y tampoco envía `Domain`.
+
+`Jwt:RefreshExpireDays` sigue en 14 y es el tope absoluto, medido desde `CreadaEn` de la primera fila de la familia. `Jwt:RefreshInactividadHoras` queda en 12. La rotación no extiende el absoluto. `Auth:CookieSameSite` queda en `Lax`. `Auth:CookieSecure` no se fija: `Secure` se apaga solo en Development sobre HTTP, y `SameSite=None` lo fuerza. `Auth:RefreshLimite` y `Auth:CierreLimite` quedan en 30, con ventanas de 60 segundos (`Auth:RefreshVentanaSegundos`, `Auth:CierreVentanaSegundos`).
+
+`POST /api/Auth/refresh` y `POST /api/Auth/cerrar-sesion` exigen el mismo encabezado y origen. El refresh rota una sola vez. La reutilización confirma en MySQL la revocación de toda la familia y después responde `401`. No hay ventana de gracia. El cierre revoca solo esa familia, borra la cookie y responde `204`; sin cookie, con cookie desconocida o vencida también responde `204` después del origen. El JWT web nuevo lleva `sid`. El middleware lo acepta solo si la familia es del usuario, tiene un token vigente y el `TokenVersion` coincide, dentro de ambos plazos. Un JWT web sin `sid` conserva la validación anterior. El agente no cambia.
+
+Dos refresh simultáneos del mismo token pueden responder `200` y `401`, y la familia queda revocada. Si la respuesta se pierde después del commit y el navegador conserva el token consumido, el reintento revoca la familia y hay que iniciar sesión de nuevo. El frontend tiene que coordinar las pestañas antes de activar el flujo. Una solicitud que ya pasó el middleware puede completar.
+
+El cambio de contraseña, el restablecimiento administrativo, la recuperación, el estado, el rol y la identidad revocan todas las familias en la misma transacción que incrementa `TokenVersion`. El desbloqueo no. Cerrar sesión no incrementa `TokenVersion`.
+
+El detalle operativo está en `README.md`, sección de sesión web.
+
+La suite con la exclusión ya documentada, después de esta etapa, dejó 415 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas. No se habilitó `CFB_PRODUCTION_TEST_OPT_IN` ni `CFB_LOCAL_TEST_API_BASE_URL`. La advertencia `NU1902` de `MySqlConnector` 2.4.0 sigue igual.
+
+La comprobación manual usó MySQL local en `127.0.0.1:3308` y la API en `127.0.0.1:5088`, con un usuario ficticio. El login sin encabezado respondió `200` sin cookie y sin `sid`. El encabezado distinto de `1`, el origen ajeno y el origen `null` respondieron `403` sin filas nuevas ni cookie. El login renovable respondió `200` con `sid`, `Cache-Control: no-store` y cookie `HttpOnly`, `Path=/api/Auth`, `SameSite=Lax`, sin `Domain` ni `Secure`. El cierre respondió `204`, dejó en `401` el JWT de esa sesión y en pie la otra. El refresh siguiente respondió `200`; repetir la cookie consumida respondió `401` y esa familia quedó revocada. Dos procesos simultáneos respondieron `200` y `401`, y la familia nueva quedó revocada. El preflight permitido respondió `204` con credenciales; el origen rechazado no recibió `Access-Control-Allow-Origin`. El límite de refresh respondió `429` al agotar 30 solicitudes en la ventana. Un JWT sin `sid` siguió llegando al cambio de contraseña. Los logs de la API no contenían la contraseña, la cookie ni `Bearer`. La auditoría guardó los eventos de sesión con detalle `cierre` o `reutilizacion`, sin el token.
+
 ## Próximo paso
 
-Únicamente inspeccionar y proponer el diseño de la etapa 6, refresh rotativo. Ese prompt no se ejecutó. La implementación queda pendiente de la revisión del diseño. No generar un bundle como parte de ese diseño.
+Revisar la etapa 6A. No integrar el frontend, no bajar la duración del access token y no generar un bundle hasta esa revisión.
 
 ## Texto para una conversación nueva
 
@@ -186,6 +207,6 @@ No hacer push, fetch, pull, merge ni rebase. No configurar upstream ni recrear l
 Leé api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md.
 Después comprobá el estado real: rama, git status, git rev-parse HEAD y git rev-parse '@{upstream}'.
 No continúes si la rama, el commit o el árbol no coinciden con el documento.
-El único paso pendiente es inspeccionar y proponer el diseño de la etapa 6, refresh rotativo.
-No implementes, no hagas operaciones remotas de Git ni generes un bundle.
+La etapa 6A ya está implementada en el commit local que actualiza este documento. El padre es 9e8fc5df290c894180cfb50708ef57033e33b671.
+No integres el frontend, no bajes la duración del access token y no generes un bundle hasta la revisión.
 ```

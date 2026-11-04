@@ -36,7 +36,12 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "recuperacion_envio_aceptado",
         "recuperacion_envio_fallido",
         "recuperacion_restablecida",
-        "recuperacion_restablecimiento_rechazado"
+        "recuperacion_restablecimiento_rechazado",
+        "sesion_emitida",
+        "sesion_rotada",
+        "sesion_reutilizada",
+        "sesion_cerrada",
+        "sesion_revocada"
     };
 
     private static readonly HashSet<string> Resultados = new(StringComparer.Ordinal)
@@ -55,7 +60,11 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "rol=RRHH",
         "invitacion_anterior",
         "recuperacion_anterior",
-        "smtp"
+        "smtp",
+        "reemplazo",
+        "reutilizacion",
+        "cierre",
+        "token_version"
     };
 
     private readonly IDbContextFactory<AppDbContext> _contextFactory;

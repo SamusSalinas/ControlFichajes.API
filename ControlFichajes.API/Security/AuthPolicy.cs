@@ -72,6 +72,31 @@ public static class AuthPolicy
         return LeerEntero(configuration, "Jwt:RefreshExpireDays", 14, minimo: 1);
     }
 
+    public static int RefreshInactividadHoras(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Jwt:RefreshInactividadHoras", 12, minimo: 1);
+    }
+
+    public static int RefreshLimite(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:RefreshLimite", 30, minimo: 1);
+    }
+
+    public static int RefreshVentanaSegundos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:RefreshVentanaSegundos", 60, minimo: 1);
+    }
+
+    public static int CierreLimite(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:CierreLimite", 30, minimo: 1);
+    }
+
+    public static int CierreVentanaSegundos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:CierreVentanaSegundos", 60, minimo: 1);
+    }
+
     public static string? UrlPublica(IConfiguration? configuration)
     {
         var url = configuration?["App:PublicBaseUrl"]?.Trim();

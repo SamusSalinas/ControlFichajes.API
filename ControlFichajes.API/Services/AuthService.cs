@@ -171,8 +171,12 @@ namespace ControlFichajes.API.Services
                 return null;
 
             var passwordTemporal = GenerarPasswordTemporal();
-            var passwordHash = _passwordHasher.HashPassword(usuario, passwordTemporal);
-            usuario.PasswordHash = passwordHash;
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (!usuario.Activo)
+                return null;
+
+            usuario.PasswordHash = _passwordHasher.HashPassword(usuario, passwordTemporal);
             usuario.RequiereCambioPassword = true;
             usuario.PasswordTemporalUsada = false;
             usuario.PasswordTemporalVenceEn = DateTime.UtcNow.AddHours(24);
@@ -180,7 +184,7 @@ namespace ControlFichajes.API.Services
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
             usuario.TokenVersion++;
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
             await AuditarAsync("password_reset_admin", "aceptado", usuario.Id, null, null);
 
             return new RestablecerPasswordResponseDto
@@ -203,6 +207,11 @@ namespace ControlFichajes.API.Services
             if (usuario == null || !usuario.Activo)
                 return false;
 
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (!usuario.Activo)
+                return false;
+
             var actualOk = _passwordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, request.PasswordActual);
             if (actualOk == PasswordVerificationResult.Failed)
                 return false;
@@ -221,7 +230,7 @@ namespace ControlFichajes.API.Services
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
             usuario.TokenVersion++;
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
             await AuditarAsync("password_cambio", "aceptado", usuario.Id, null, null);
             return true;
         }
@@ -249,9 +258,14 @@ namespace ControlFichajes.API.Services
             if (usuario.Activo == activo)
                 return ToListItem(usuario);
 
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (usuario.Activo == activo)
+                return ToListItem(usuario);
+
             usuario.Activo = activo;
             usuario.TokenVersion++;
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
             await AuditarAsync("usuario_estado", "aceptado", usuario.Id, null, activo ? "activo" : "inactivo");
             return ToListItem(usuario);
         }
@@ -268,9 +282,17 @@ namespace ControlFichajes.API.Services
             if (string.Equals(usuario.Rol, rolNormalizado, StringComparison.Ordinal))
                 return ToListItem(usuario);
 
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (AppRoles.IsSuperAdmin(usuario.Rol))
+                return null;
+
+            if (string.Equals(usuario.Rol, rolNormalizado, StringComparison.Ordinal))
+                return ToListItem(usuario);
+
             usuario.Rol = rolNormalizado;
             usuario.TokenVersion++;
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
             await AuditarAsync("usuario_rol", "aceptado", usuario.Id, null, "rol=" + rolNormalizado);
             return ToListItem(usuario);
         }
@@ -299,10 +321,22 @@ namespace ControlFichajes.API.Services
             if (mismoNombre && mismoCorreo)
                 return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
 
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            correoTomado = await _context.Usuario.AnyAsync(item =>
+                item.Id != usuarioId && item.Correo == correoNormalizado);
+            if (correoTomado)
+                return new IdentidadUpdateResult(StatusCodes.Status409Conflict, UsuarioIdentidadRules.CorreoDuplicado, null);
+
+            mismoNombre = string.Equals(usuario.NombreUsuario, nombreUsuario, StringComparison.Ordinal);
+            mismoCorreo = string.Equals(usuario.Correo, correoNormalizado, StringComparison.Ordinal);
+            if (mismoNombre && mismoCorreo)
+                return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
+
             usuario.NombreUsuario = nombreUsuario!;
             usuario.Correo = correoNormalizado;
             usuario.TokenVersion++;
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
             await AuditarAsync("usuario_identidad", "aceptado", usuario.Id, null, "identidad");
             return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
         }
@@ -407,6 +441,15 @@ namespace ControlFichajes.API.Services
                     evento,
                     ex.GetType().Name);
             }
+        }
+
+        private async Task ConfirmarRevocandoAsync(AlcanceUsuario alcance, Usuario usuario)
+        {
+            var revocadas = await RevocacionSesiones.MarcarTodasAsync(_context, usuario.Id, DateTime.UtcNow);
+            await _context.SaveChangesAsync();
+            await alcance.ConfirmarAsync();
+            if (revocadas > 0)
+                await AuditarAsync("sesion_revocada", "aceptado", usuario.Id, null, "token_version");
         }
 
         private AuthResponseDto CrearRespuesta(Usuario usuario)

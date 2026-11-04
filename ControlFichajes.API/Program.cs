@@ -53,6 +53,24 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromSeconds(AuthPolicy.RecuperacionRestablecerVentanaSegundos(builder.Configuration)),
                 QueueLimit = 0
             }));
+    options.AddPolicy(AuthController.PoliticaLimiteRefresh, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.RefreshLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.RefreshVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(AuthController.PoliticaLimiteCierre, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.CierreLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.CierreVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
 });
 builder.Services.AddHttpContextAccessor();
 
@@ -83,7 +101,8 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -91,6 +110,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ICorreoSaliente, MailKitCorreoSaliente>();
 builder.Services.AddScoped<IInvitacionUsuarioService, InvitacionUsuarioService>();
 builder.Services.AddScoped<IRecuperacionPasswordService, RecuperacionPasswordService>();
+builder.Services.AddScoped<ISesionWebService, SesionWebService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IAgenteAuthService, AgenteAuthService>();
 builder.Services.AddScoped<IAgenteAdminService, AgenteAdminService>();

@@ -1,6 +1,6 @@
 # Estado actual
 
-La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`, commit `0aa14677401352349bcc06deed76c8fd3e72950e`, al 4 de noviembre de 2026. Ese documento no reemplaza el cierre de turnos de abajo.
+La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 5B es `0aa14677401352349bcc06deed76c8fd3e72950e`. La etapa 6A, refresh rotativo, queda en el commit que actualiza esa continuidad, con padre `9e8fc5df290c894180cfb50708ef57033e33b671`, al 4 de noviembre de 2026. Ese documento no reemplaza el cierre de turnos de abajo.
 
 Cierre de la noche del 2 de noviembre de 2026. No se desplegó ni se mergeó a `main`.
 

@@ -18,9 +18,16 @@ public sealed class JwtTokenService : ITokenService
 
     public string CreateToken(Usuario usuario)
     {
+        return CreateToken(usuario, null);
+    }
+
+    public string CreateToken(Usuario usuario, string? sesionId)
+    {
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(GetRequiredConfiguration("Jwt:Key"));
         var claims = CreateClaims(usuario);
+        if (!string.IsNullOrWhiteSpace(sesionId))
+            claims.Add(new Claim("sid", sesionId));
 
         var tokenDescriptor = new SecurityTokenDescriptor
         {

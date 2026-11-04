@@ -191,6 +191,69 @@ y `Auth:RecuperacionRestablecerVentanaSegundos`). Al superarlos responden `429`.
 La auditoría registra la solicitud, la invalidación, el envío aceptado o fallido
 y el restablecimiento. No guarda token, contraseña, confirmación, enlace ni cuerpo.
 
+### Sesión web con refresh rotativo
+
+La tabla `RefreshToken` ya estaba en el esquema. No se agrega migración. `FamiliaId` sigue siendo `char(36)`. En el modelo es `Guid` porque el conector lee esa columna como identificador, no como texto. El plazo
+absoluto es `Jwt:RefreshExpireDays`, 14 días desde `CreadaEn` de la primera fila
+de la familia. La inactividad es `Jwt:RefreshInactividadHoras`, 12 horas. Cada
+rotación deja `ExpiraEn` en el menor de esos dos plazos. Una rotación no mueve
+el inicio de la familia ni alarga el plazo absoluto. El access token sigue en
+`Jwt:ExpireMinutes` hasta que el frontend consuma el refresh. `Jwt:AgentExpireMinutes`
+sigue sin leerse.
+
+`POST /api/Auth/Login` sin `X-CF-Solicitud` responde igual que antes y no crea
+una familia ni escribe la cookie. Si el encabezado está presente y no vale `1`,
+la respuesta es `403` y no se intenta el login. Con `X-CF-Solicitud: 1` hace
+falta un `Origin` de `Cors:AllowedOrigins`. `Origin` ausente, vacío, `null` o
+ajeno a la lista también responde `403`, antes de tocar filas o cookies. El
+login renovable escribe la cookie `cf_refresh` solo después de autenticar y
+confirmar la fila. Es `HttpOnly`, de host, con `Path=/api/Auth`. `Auth:CookieSameSite`
+vale `Lax` por defecto. `Auth:CookieSecure` es opcional: sin valor, `Secure`
+queda apagado solo en Development sobre HTTP. `SameSite=None` fuerza `Secure`.
+El borrado usa el mismo nombre, `Path` y omite `Domain`, igual que la creación.
+
+Si ese login presenta una cookie de una familia del mismo usuario, esa familia
+se revoca en la misma operación y las demás sesiones siguen. Un login fallido
+no revoca la anterior. El alta tradicional, el bootstrap y `Auth/agente` no
+crean familias ni cookies. El access de la sesión nueva lleva `sid` y
+`token_version`.
+
+`POST /api/Auth/refresh` lee el refresh solo desde la cookie y responde las tres
+claves del login. En MySQL bloquea la fila del usuario con `SELECT ... FOR UPDATE`,
+relee usuario y token, consume el anterior e inserta un sucesor. La cookie sale
+después del commit. No hay ventana de gracia. Si el token ya fue consumido, se
+confirma la revocación de toda la familia y recién ahí se responde `401`. Un
+fallo antes de ese commit no deja la revocación hecha. Dos refresh simultáneos
+del mismo token pueden terminar en `200` y `401`, con la familia revocada: el
+`200` no deja una sesión usable. Si la respuesta se pierde después del commit
+y el navegador conserva el token consumido, el reintento revoca la familia y
+hay que volver a iniciar sesión. El frontend tiene que coordinar las pestañas
+antes de activar este flujo.
+
+`POST /api/Auth/cerrar-sesion` exige la misma protección, revoca solo esa
+familia, borra la cookie y responde `204`. Cookie ausente, desconocida o
+vencida también responde `204` una vez pasado el origen. El middleware, para
+un JWT web con `sid`, exige una fila de esa familia del mismo usuario, sin
+revocar, sin reemplazar, con el mismo `TokenVersion` y dentro de ambos plazos.
+Un `sid` desconocido o de otra cuenta responde `401`. Un JWT web anterior, sin
+`sid`, conserva la validación de usuario activo y `token_version`. El cierre
+no lo puede invalidar. `Auth/agente` no entra en esa consulta. Una solicitud
+que ya pasó el middleware puede completar; la siguiente, no.
+
+Cambiar la contraseña, el restablecimiento administrativo, la recuperación, el
+estado, el rol o la identidad siguen incrementando `TokenVersion` y, en esa
+misma transacción, revocan todas las familias del usuario. El desbloqueo y
+`X-Empresa-Id` no. Cerrar una sesión no incrementa `TokenVersion`, así que las
+otras sesiones del usuario siguen vigentes.
+
+`OPTIONS` lo responde CORS y no ejecuta estas operaciones. La política permite
+credenciales solo para los orígenes explícitos. Refresh y cierre tienen límite
+propio por IP: 30 por 60 segundos (`Auth:RefreshLimite`,
+`Auth:RefreshVentanaSegundos`, `Auth:CierreLimite`,
+`Auth:CierreVentanaSegundos`). Al superarlo responden `429`. Esas respuestas,
+igual que el login, van con `Cache-Control: no-store`. Los logs y la auditoría
+no guardan la cookie, el token, el encabezado `Authorization` ni el cuerpo.
+
 ### Alta inicial de SuperAdmin
 
 Esta cuenta no se crea por un endpoint público. La inserta un administrador de

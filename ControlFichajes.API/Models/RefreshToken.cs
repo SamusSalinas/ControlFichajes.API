@@ -13,8 +13,7 @@ public class RefreshToken
     [MaxLength(64)]
     public string TokenHash { get; set; } = string.Empty;
 
-    [MaxLength(36)]
-    public string FamiliaId { get; set; } = string.Empty;
+    public Guid FamiliaId { get; set; }
 
     public DateTime ExpiraEn { get; set; }
 

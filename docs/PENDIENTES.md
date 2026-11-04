@@ -2,8 +2,8 @@
 
 Autenticación, 4 de noviembre de 2026. El detalle está en `docs/CONTINUIDAD_AUTENTICACION.md`.
 
-- El próximo paso es solo inspeccionar y proponer el diseño de la etapa 6, refresh rotativo. Ese prompt no se ejecutó. La implementación queda pendiente de la revisión del diseño.
-- No están implementados refresh ni MFA.
+- La etapa 6A, refresh rotativo en la API, está implementada y pendiente de revisión. No integrar el frontend ni acortar el access token antes de esa revisión.
+- MFA no está implementado.
 - Los bundles locales de 5A y 5B fueron verificados según las salidas de PowerShell aportadas por el usuario. Las rutas y los hashes están en `docs/CONTINUIDAD_AUTENTICACION.md`. La subida de ambos a Drive sigue pendiente de confirmación.
 
 Hechos abiertos al cierre de la noche del 2 de noviembre de 2026.

@@ -142,6 +142,7 @@ public sealed class RecuperacionPasswordService : IRecuperacionPasswordService
             usuario!.PasswordHash = _passwordHasher.HashPassword(usuario, password);
             usuario.RequiereCambioPassword = false;
             usuario.TokenVersion++;
+            var sesiones = await RevocacionSesiones.MarcarTodasAsync(_context, usuario.Id, ahora, cancellationToken);
             recuperacion.UsadaEn = ahora;
 
             var otras = await _context.RecuperacionPassword
@@ -155,6 +156,9 @@ public sealed class RecuperacionPasswordService : IRecuperacionPasswordService
                 await transaccion.CommitAsync(cancellationToken);
 
             await AuditarAsync("recuperacion_restablecida", "aceptado", usuario.Id, usuario.Correo, null);
+            if (sesiones > 0)
+                await AuditarAsync("sesion_revocada", "aceptado", usuario.Id, null, "token_version");
+
             return new RestablecimientoPassword { Estado = EstadoRestablecimiento.Restablecida };
         }
         catch (Exception ex)

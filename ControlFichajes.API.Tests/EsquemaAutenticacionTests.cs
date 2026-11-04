@@ -154,7 +154,7 @@ public class EsquemaAutenticacionTests
         {
             UsuarioId = usuario.Id,
             TokenHash = new string('a', 64),
-            FamiliaId = Guid.NewGuid().ToString("D"),
+            FamiliaId = Guid.NewGuid(),
             ExpiraEn = DateTime.UtcNow.AddDays(1),
             CreadaEn = DateTime.UtcNow,
             TokenVersion = usuario.TokenVersion
@@ -190,6 +190,11 @@ public class EsquemaAutenticacionTests
         Assert.Equal(5, AuthPolicy.RecuperacionRestablecerLimite(vacia));
         Assert.Equal(60, AuthPolicy.RecuperacionRestablecerVentanaSegundos(vacia));
         Assert.Equal(14, AuthPolicy.RefreshExpireDays(vacia));
+        Assert.Equal(12, AuthPolicy.RefreshInactividadHoras(vacia));
+        Assert.Equal(30, AuthPolicy.RefreshLimite(vacia));
+        Assert.Equal(60, AuthPolicy.RefreshVentanaSegundos(vacia));
+        Assert.Equal(30, AuthPolicy.CierreLimite(vacia));
+        Assert.Equal(60, AuthPolicy.CierreVentanaSegundos(vacia));
         Assert.Null(AuthPolicy.UrlPublica(vacia));
 
         var explicita = new ConfigurationBuilder()
