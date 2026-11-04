@@ -19,6 +19,7 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "password_cambio",
         "password_reset_admin",
         "usuario_bootstrap",
+        "bootstrap_deshabilitado",
         "usuario_alta",
         "usuario_estado",
         "usuario_rol",

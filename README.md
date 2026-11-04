@@ -12,7 +12,7 @@ El backend es la fuente de verdad del contrato que consumirán posteriormente el
 
 ## Contrato de la API
 
-Todos los endpoints siguientes, excepto el login y el registro inicial, requieren:
+Todos los endpoints siguientes, excepto el login y la autenticación del agente, requieren:
 
 ```http
 Authorization: Bearer <token>
@@ -36,26 +36,20 @@ Las contraseñas almacenadas en `Usuario.PasswordHash` deben ser hashes generado
 
 ### Registro de usuarios
 
-El primer usuario se crea una sola vez mediante el endpoint de bootstrap.
+`POST /api/auth/bootstrap` está apagado. `Auth:PermitirBootstrap` vale `false` en
+`appsettings.json`, en el ejemplo de producción y en Docker. Si la clave falta,
+también queda apagado: el entorno Development no lo enciende.
 
-Este endpoint solo funciona cuando la tabla `Usuario` está vacía y crea un usuario con rol `ADMIN`:
+Con el flag apagado el endpoint responde `404 Not Found`, aunque `Usuario` esté
+vacía. No crea la cuenta ni devuelve un JWT. Un intento queda en
+`AuditoriaSeguridad` como `bootstrap_deshabilitado` / `rechazado`, sin correo,
+contraseña ni cuerpo del request.
 
-```http
-POST /api/auth/bootstrap
-Content-Type: application/json
-
-{
-    "empresaId": 1,
-    "nombreUsuario": "Administrador",
-    "email": "admin@empresa.local",
-    "password": "UnaClaveSegura123",
-    "rol": "ADMIN"
-}
-```
-
-La empresa indicada debe existir previamente.
-
-La respuesta devuelve un JWT, por lo que se puede reutilizar directamente como Bearer token.
+Solo un laboratorio local puede encenderlo, y únicamente en configuración que no
+se versiona, por ejemplo `appsettings.Development.local.json` o una variable de
+entorno del proceso. En ese caso sigue exigiendo que `Usuario` esté vacía. Si ya
+hay alguna fila, responde `409 Conflict`. El rol del cuerpo se ignora: la cuenta
+creada es `ADMIN`. El cuerpo no puede crear un `SuperAdmin`.
 
 Después, un administrador puede registrar a sus compañeros mediante:
 
@@ -77,15 +71,119 @@ Solo se permiten los roles `ADMIN` y `RRHH`.
 
 El administrador no puede crear usuarios para otra empresa. Las contraseñas se almacenan como hash y nunca se devuelven en la respuesta.
 
-Si ya existe algún usuario, `POST /api/auth/bootstrap` responde `409 Conflict`.
+Si ya existe algún usuario y el bootstrap fue habilitado de forma explícita,
+`POST /api/auth/bootstrap` responde `409 Conflict`.
 
-En ese caso, se debe utilizar el token de un administrador para crear nuevos usuarios.
+En el funcionamiento normal se utiliza el token de un administrador para crear
+nuevos usuarios.
+
+### Alta inicial de SuperAdmin
+
+Esta cuenta no se crea por un endpoint público. La inserta un administrador de
+la base, con la API detenida o sin usar `POST /api/auth/bootstrap`.
+
+No guardar la contraseña ni el hash resultante en el repositorio, en argumentos
+del proceso ni en logs. El hash se genera en el momento con
+`PasswordHasher<Usuario>` de ASP.NET Core Identity, el mismo que usa la API.
+Cada ejecución produce un hash distinto. No reutilizar un hash de ejemplo.
+
+En una consola local, leer la contraseña desde el teclado y escribir solo el
+hash. Descartar el programa al terminar:
+
+```csharp
+using ControlFichajes.API.Models;
+using Microsoft.AspNetCore.Identity;
+
+var hasher = new PasswordHasher<Usuario>();
+Console.Write("Contraseña: ");
+var password = LeerOculta();
+Console.WriteLine(hasher.HashPassword(new Usuario(), password));
+
+static string LeerOculta()
+{
+    var buffer = new System.Text.StringBuilder();
+    while (true)
+    {
+        var tecla = Console.ReadKey(intercept: true);
+        if (tecla.Key == ConsoleKey.Enter)
+            break;
+        if (tecla.Key == ConsoleKey.Backspace && buffer.Length > 0)
+        {
+            buffer.Length--;
+            continue;
+        }
+
+        if (!char.IsControl(tecla.KeyChar))
+            buffer.Append(tecla.KeyChar);
+    }
+
+    Console.WriteLine();
+    return buffer.ToString();
+}
+```
+
+La empresa ya tiene que existir. El correo se guarda como lo normaliza el login:
+sin espacios al inicio ni al final, y con las mayúsculas tal como se van a
+escribir después. El rol exacto es `SuperAdmin`. `Activo` queda en `1`.
+
+```sql
+INSERT INTO `Usuario` (
+  `EmpresaId`, `NombreUsuario`, `Correo`, `PasswordHash`, `Rol`, `Activo`,
+  `RequiereCambioPassword`, `IntentosFallidos`, `PasswordTemporalUsada`,
+  `TokenVersion`, `TotpHabilitado`
+) VALUES (
+  /* REEMPLAZAR_EMPRESA_ID */ 0,
+  'REEMPLAZAR_NOMBRE',
+  'REEMPLAZAR_CORREO',
+  'REEMPLAZAR_HASH_PASSWORDHASHER',
+  'SuperAdmin',
+  1,
+  0,
+  0,
+  0,
+  0,
+  0
+);
+```
+
+Comprobar empresa, correo, rol y estado antes de iniciar sesión:
+
+```sql
+SELECT e.Id AS EmpresaId, e.CUIT, u.Correo, u.Rol, u.Activo, u.TokenVersion,
+       CHAR_LENGTH(u.PasswordHash) AS LargoHash
+FROM `Usuario` u
+JOIN `Empresa` e ON e.Id = u.EmpresaId
+WHERE u.Correo = 'REEMPLAZAR_CORREO';
+```
+
+El resultado esperado es la empresa elegida, el correo sin espacios, `Rol`
+igual a `SuperAdmin`, `Activo` en `1` y un hash de Identity V3. Ese hash
+empieza con `AQAAAA` y no es la contraseña.
+
+Si la cuenta quedó mal, revocarla sin borrar historia de otras tablas:
+
+```sql
+UPDATE `Usuario`
+SET `Activo` = 0, `TokenVersion` = `TokenVersion` + 1
+WHERE `Correo` = 'REEMPLAZAR_CORREO' AND `Rol` = 'SuperAdmin';
+```
+
+Eso impide el login y deja inválidos los JWT web ya emitidos. Si la fila no
+llegó a usarse y hay que eliminarla:
+
+```sql
+DELETE FROM `Usuario`
+WHERE `Correo` = 'REEMPLAZAR_CORREO' AND `Rol` = 'SuperAdmin';
+```
+
+Las observaciones y reposiciones que apunten a ese usuario quedan con el autor
+en NULL. Las tablas de invitación, recuperación, refresh y MFA se borran en
+cascada. `AuditoriaSeguridad` no se borra con la cuenta.
 
 ### Flujo del SuperAdmin
 
-El primer usuario creado por `POST /api/auth/bootstrap` es `ADMIN`, no
-`SuperAdmin`. Para disponer de un SuperAdmin, la cuenta debe existir en la base
-de datos con `Rol = "SuperAdmin"` y estar activa (`Activo = true`).
+La cuenta tiene que existir en la base con `Rol = "SuperAdmin"` y
+`Activo = true`. No sale de `POST /api/auth/bootstrap`.
 
 1. Iniciar sesión con `POST /api/auth/login` usando las credenciales del SuperAdmin.
 2. Guardar el JWT recibido. El token de SuperAdmin no contiene `empresa_id`.

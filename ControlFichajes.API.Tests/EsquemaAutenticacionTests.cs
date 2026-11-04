@@ -99,7 +99,16 @@ public class EsquemaAutenticacionTests
 
         Assert.Contains("Auth__ExigirMfa=false", ejemplo, StringComparison.Ordinal);
         Assert.Contains("Auth__PermitirBootstrap=false", ejemplo, StringComparison.Ordinal);
+        Assert.DoesNotContain("PermitirBootstrap=true", ejemplo, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Password123", ejemplo, StringComparison.Ordinal);
+
+        var appsettings = File.ReadAllText(BuscarArchivo("ControlFichajes.API", "appsettings.json"));
+        var compose = File.ReadAllText(BuscarArchivo("ControlFichajes.API", "docker-compose.yml"));
+        Assert.Contains("\"PermitirBootstrap\": false", appsettings, StringComparison.Ordinal);
+        Assert.Contains("Auth__PermitirBootstrap: \"false\"", compose, StringComparison.Ordinal);
+        Assert.DoesNotContain("PermitirBootstrap=true", appsettings, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PermitirBootstrap: \"true\"", compose, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PermitirBootstrap=true", compose, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -171,8 +180,7 @@ public class EsquemaAutenticacionTests
 
         Assert.False(AuthPolicy.ExigirMfa(vacia));
         Assert.True(AuthPolicy.PermitirAltaConPassword(vacia));
-        Assert.False(AuthPolicy.PermitirBootstrap(vacia, esDevelopment: false));
-        Assert.True(AuthPolicy.PermitirBootstrap(vacia, esDevelopment: true));
+        Assert.False(AuthPolicy.PermitirBootstrap(vacia));
         Assert.Equal(72, AuthPolicy.InvitacionHoras(vacia));
         Assert.Equal(1, AuthPolicy.RecuperacionHoras(vacia));
         Assert.Equal(14, AuthPolicy.RefreshExpireDays(vacia));
@@ -188,7 +196,7 @@ public class EsquemaAutenticacionTests
             .Build();
 
         Assert.True(AuthPolicy.ExigirMfa(explicita));
-        Assert.False(AuthPolicy.PermitirBootstrap(explicita, esDevelopment: true));
+        Assert.False(AuthPolicy.PermitirBootstrap(explicita));
         Assert.Equal("https://panel.example", AuthPolicy.UrlPublica(explicita));
     }
 

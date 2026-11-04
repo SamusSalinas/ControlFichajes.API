@@ -422,11 +422,12 @@ public class AuditoriaSeguridadTests
     }
 
     private static readonly ConditionalWeakTable<AppDbContext, OpcionesGuardadas> Opciones = new();
+    private static readonly InMemoryDatabaseRoot Raiz = new();
 
     private static AppDbContext CrearContexto()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString(), new InMemoryDatabaseRoot())
+            .UseInMemoryDatabase(Guid.NewGuid().ToString(), Raiz)
             .Options;
         var context = new AppDbContext(options);
         Opciones.Add(context, new OpcionesGuardadas { Options = options });

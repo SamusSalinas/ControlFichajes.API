@@ -2,12 +2,9 @@ namespace ControlFichajes.API.Security;
 
 public static class AuthPolicy
 {
-    public static bool PermitirBootstrap(IConfiguration? configuration, bool esDevelopment)
+    public static bool PermitirBootstrap(IConfiguration? configuration)
     {
         var raw = configuration?["Auth:PermitirBootstrap"];
-        if (string.IsNullOrWhiteSpace(raw))
-            return esDevelopment;
-
         return bool.TryParse(raw, out var habilitado) && habilitado;
     }
 
