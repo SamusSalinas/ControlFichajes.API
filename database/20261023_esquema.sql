@@ -196,10 +196,101 @@ CREATE TABLE `Usuario` (
   `PasswordTemporalVenceEn` datetime(6) DEFAULT NULL,
   `PasswordTemporalUsada` tinyint(1) NOT NULL,
   `TokenVersion` int NOT NULL,
+  `CorreoVerificadoEn` datetime(6) DEFAULT NULL,
+  `InvitadoEn` datetime(6) DEFAULT NULL,
+  `InvitacionAceptadaEn` datetime(6) DEFAULT NULL,
+  `TotpHabilitado` tinyint(1) NOT NULL DEFAULT 0,
+  `TotpSecretoCifrado` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  `MfaOmitidoHasta` datetime(6) DEFAULT NULL,
+  `UltimoPasoTotp` bigint DEFAULT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `IX_Usuario_Correo` (`Correo`),
   KEY `IX_Usuario_EmpresaId` (`EmpresaId`),
   CONSTRAINT `FK_Usuario_Empresa_EmpresaId` FOREIGN KEY (`EmpresaId`) REFERENCES `Empresa` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `InvitacionUsuario` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UsuarioId` int NOT NULL,
+  `TokenHash` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `ExpiraEn` datetime(6) NOT NULL,
+  `UsadaEn` datetime(6) DEFAULT NULL,
+  `CreadaEn` datetime(6) NOT NULL,
+  `CreadaPorUsuarioId` int DEFAULT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `UX_InvitacionUsuario_TokenHash` (`TokenHash`),
+  KEY `IX_InvitacionUsuario_UsuarioId` (`UsuarioId`),
+  CONSTRAINT `FK_InvitacionUsuario_Usuario_UsuarioId` FOREIGN KEY (`UsuarioId`) REFERENCES `Usuario` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `RecuperacionPassword` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UsuarioId` int NOT NULL,
+  `TokenHash` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `ExpiraEn` datetime(6) NOT NULL,
+  `UsadaEn` datetime(6) DEFAULT NULL,
+  `CreadaEn` datetime(6) NOT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `UX_RecuperacionPassword_TokenHash` (`TokenHash`),
+  KEY `IX_RecuperacionPassword_UsuarioId` (`UsuarioId`),
+  CONSTRAINT `FK_RecuperacionPassword_Usuario_UsuarioId` FOREIGN KEY (`UsuarioId`) REFERENCES `Usuario` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `RefreshToken` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UsuarioId` int NOT NULL,
+  `TokenHash` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `FamiliaId` char(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `ExpiraEn` datetime(6) NOT NULL,
+  `RevocadaEn` datetime(6) DEFAULT NULL,
+  `ReemplazadaPorId` int DEFAULT NULL,
+  `CreadaEn` datetime(6) NOT NULL,
+  `Ip` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  `UserAgent` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  `TokenVersion` int NOT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `UX_RefreshToken_TokenHash` (`TokenHash`),
+  KEY `IX_RefreshToken_UsuarioId` (`UsuarioId`),
+  KEY `IX_RefreshToken_FamiliaId` (`FamiliaId`),
+  CONSTRAINT `FK_RefreshToken_Usuario_UsuarioId` FOREIGN KEY (`UsuarioId`) REFERENCES `Usuario` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `CodigoRecuperacionMfa` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UsuarioId` int NOT NULL,
+  `CodigoHash` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `UsadoEn` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `IX_CodigoRecuperacionMfa_UsuarioId` (`UsuarioId`),
+  CONSTRAINT `FK_CodigoRecuperacionMfa_Usuario_UsuarioId` FOREIGN KEY (`UsuarioId`) REFERENCES `Usuario` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `DesafioMfa` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UsuarioId` int NOT NULL,
+  `TokenHash` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `ExpiraEn` datetime(6) NOT NULL,
+  `ConsumidoEn` datetime(6) DEFAULT NULL,
+  `Proposito` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `UX_DesafioMfa_TokenHash` (`TokenHash`),
+  KEY `IX_DesafioMfa_UsuarioId` (`UsuarioId`),
+  CONSTRAINT `FK_DesafioMfa_Usuario_UsuarioId` FOREIGN KEY (`UsuarioId`) REFERENCES `Usuario` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `AuditoriaSeguridad` (
+  `Id` bigint NOT NULL AUTO_INCREMENT,
+  `FechaUtc` datetime(6) NOT NULL,
+  `UsuarioId` int DEFAULT NULL,
+  `Correo` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  `Evento` varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `Resultado` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `Ip` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  `UserAgent` varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  `Detalle` varchar(300) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  PRIMARY KEY (`Id`),
+  KEY `IX_AuditoriaSeguridad_FechaUtc` (`FechaUtc`),
+  KEY `IX_AuditoriaSeguridad_UsuarioId` (`UsuarioId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 ALTER TABLE `ReposicionHoras` ADD CONSTRAINT `CK_ReposicionHoras_Minutos` CHECK (`Minutos` BETWEEN 1 AND 1440);

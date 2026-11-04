@@ -46,5 +46,20 @@ namespace ControlFichajes.API.Models
         public bool PasswordTemporalUsada { get; set; } = false;
 
         public int TokenVersion { get; set; } = 0;
+
+        public DateTime? CorreoVerificadoEn { get; set; }
+
+        public DateTime? InvitadoEn { get; set; }
+
+        public DateTime? InvitacionAceptadaEn { get; set; }
+
+        public bool TotpHabilitado { get; set; }
+
+        [MaxLength(512)]
+        public string? TotpSecretoCifrado { get; set; }
+
+        public DateTime? MfaOmitidoHasta { get; set; }
+
+        public long? UltimoPasoTotp { get; set; }
     }
 }

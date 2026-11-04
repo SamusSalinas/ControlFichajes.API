@@ -21,6 +21,12 @@ namespace ControlFichajes.API.Data
         public DbSet<EmpleadoTurno> EmpleadoTurno { get; set; } = null!;
         public DbSet<EmpleadoJornadaExcepcion> EmpleadoJornadaExcepcion { get; set; } = null!;
         public DbSet<ReposicionHoras> ReposicionHoras { get; set; } = null!;
+        public DbSet<InvitacionUsuario> InvitacionUsuario { get; set; } = null!;
+        public DbSet<RecuperacionPassword> RecuperacionPassword { get; set; } = null!;
+        public DbSet<RefreshToken> RefreshToken { get; set; } = null!;
+        public DbSet<CodigoRecuperacionMfa> CodigoRecuperacionMfa { get; set; } = null!;
+        public DbSet<DesafioMfa> DesafioMfa { get; set; } = null!;
+        public DbSet<AuditoriaSeguridad> AuditoriaSeguridad { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -31,6 +37,38 @@ namespace ControlFichajes.API.Data
             modelBuilder.Entity<Empleado>().HasIndex(e => e.DNI).IsUnique();
             modelBuilder.Entity<Empleado>().HasIndex(e => e.CUIL).IsUnique();
             modelBuilder.Entity<Usuario>().HasIndex(u => u.Correo).IsUnique();
+            modelBuilder.Entity<InvitacionUsuario>().HasIndex(i => i.TokenHash).IsUnique();
+            modelBuilder.Entity<InvitacionUsuario>()
+                .HasOne(i => i.Usuario)
+                .WithMany()
+                .HasForeignKey(i => i.UsuarioId)
+                .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<RecuperacionPassword>().HasIndex(r => r.TokenHash).IsUnique();
+            modelBuilder.Entity<RecuperacionPassword>()
+                .HasOne(r => r.Usuario)
+                .WithMany()
+                .HasForeignKey(r => r.UsuarioId)
+                .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<RefreshToken>().HasIndex(r => r.TokenHash).IsUnique();
+            modelBuilder.Entity<RefreshToken>().HasIndex(r => r.FamiliaId);
+            modelBuilder.Entity<RefreshToken>()
+                .HasOne(r => r.Usuario)
+                .WithMany()
+                .HasForeignKey(r => r.UsuarioId)
+                .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<CodigoRecuperacionMfa>()
+                .HasOne(c => c.Usuario)
+                .WithMany()
+                .HasForeignKey(c => c.UsuarioId)
+                .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<DesafioMfa>().HasIndex(d => d.TokenHash).IsUnique();
+            modelBuilder.Entity<DesafioMfa>()
+                .HasOne(d => d.Usuario)
+                .WithMany()
+                .HasForeignKey(d => d.UsuarioId)
+                .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<AuditoriaSeguridad>().HasIndex(a => a.FechaUtc);
+            modelBuilder.Entity<AuditoriaSeguridad>().HasIndex(a => a.UsuarioId);
             modelBuilder.Entity<Sucursal>().HasIndex(s => new { s.Nombre, s.EmpresaId }).IsUnique();
             modelBuilder.Entity<Departamento>().HasIndex(d => new { d.Nombre, d.SucursalId }).IsUnique();
             modelBuilder.Entity<TurnoDia>().HasIndex(d => new { d.TurnoId, d.DiaSemana }).IsUnique();
