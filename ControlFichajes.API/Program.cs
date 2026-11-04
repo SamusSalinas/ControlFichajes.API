@@ -7,6 +7,7 @@ using System.Text;
 using Microsoft.AspNetCore.Identity;
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Security;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +29,8 @@ if (string.IsNullOrWhiteSpace(connectionString))
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.Parse("8.0.0-mysql")));
+builder.Services.AddScoped<IDbContextFactory<AppDbContext>, AuditoriaDbContextFactory>();
+builder.Services.AddScoped<IAuditoriaSeguridad, AuditoriaSeguridadService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
@@ -109,6 +112,10 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
+var forwarded = new ForwardedHeadersOptions();
+if (ProxyConfiable.IntentarAplicar(forwarded, app.Configuration.GetSection(ProxyConfiable.Seccion), app.Logger))
+    app.UseForwardedHeaders(forwarded);
 
 app.UseHttpsRedirection();
 app.UseCors("PermitirFrontend");

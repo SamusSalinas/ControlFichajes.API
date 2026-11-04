@@ -5,8 +5,8 @@ using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Security;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ControlFichajes.API.Services
 {
@@ -15,18 +15,21 @@ namespace ControlFichajes.API.Services
         private readonly AppDbContext _context;
         private readonly IPasswordHasher<Usuario> _passwordHasher;
         private readonly ITokenService _tokenService;
-        private readonly IHttpContextAccessor? _httpContextAccessor;
+        private readonly IAuditoriaSeguridad? _auditoria;
+        private readonly ILogger<AuthService>? _logger;
 
         public AuthService(
             AppDbContext context,
             IPasswordHasher<Usuario> passwordHasher,
             ITokenService tokenService,
-            IHttpContextAccessor? httpContextAccessor = null)
+            IAuditoriaSeguridad? auditoria = null,
+            ILogger<AuthService>? logger = null)
         {
             _context = context;
             _passwordHasher = passwordHasher;
             _tokenService = tokenService;
-            _httpContextAccessor = httpContextAccessor;
+            _auditoria = auditoria;
+            _logger = logger;
         }
 
         public async Task<AuthResponseDto?> LoginAsync(LoginRequestDto loginDto)
@@ -40,15 +43,15 @@ namespace ControlFichajes.API.Services
 
             if (usuario == null)
             {
-                Auditar("login_fallido", "rechazado", null, correo, null, loginDto.Password);
                 await _context.SaveChangesAsync();
+                await AuditarAsync("login_fallido", "rechazado", null, correo, null);
                 return null;
             }
 
             if (usuario.BloqueadoHasta.HasValue && usuario.BloqueadoHasta > DateTime.UtcNow)
             {
-                Auditar("login_bloqueado", "rechazado", usuario.Id, null, null, loginDto.Password);
                 await _context.SaveChangesAsync();
+                await AuditarAsync("login_bloqueado", "rechazado", usuario.Id, null, null);
                 return null;
             }
 
@@ -65,26 +68,26 @@ namespace ControlFichajes.API.Services
                 if (bloqueado)
                     usuario.BloqueadoHasta = DateTime.UtcNow.AddMinutes(15);
 
-                Auditar("login_fallido", "rechazado", usuario.Id, null, null, loginDto.Password);
-                if (bloqueado)
-                    Auditar("login_bloqueado", "rechazado", usuario.Id, null, null, loginDto.Password);
-
                 await _context.SaveChangesAsync();
+                await AuditarAsync("login_fallido", "rechazado", usuario.Id, null, null);
+                if (bloqueado)
+                    await AuditarAsync("login_bloqueado", "rechazado", usuario.Id, null, null);
+
                 return null;
             }
 
             if (usuario.RequiereCambioPassword && !PasswordTemporalVigente(usuario, DateTime.UtcNow))
             {
-                Auditar("login_fallido", "rechazado", usuario.Id, null, "clave_temporal_vencida", loginDto.Password);
                 await _context.SaveChangesAsync();
+                await AuditarAsync("login_fallido", "rechazado", usuario.Id, null, "clave_temporal_vencida");
                 return null;
             }
 
             usuario.IntentosFallidos = 0;
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
-            Auditar("login_ok", "aceptado", usuario.Id, null, null, loginDto.Password);
             await _context.SaveChangesAsync();
+            await AuditarAsync("login_ok", "aceptado", usuario.Id, null, null);
 
             return CrearRespuesta(usuario);
         }
@@ -113,8 +116,7 @@ namespace ControlFichajes.API.Services
 
             _context.Usuario.Add(usuario);
             await _context.SaveChangesAsync();
-            Auditar(bootstrap ? "usuario_bootstrap" : "usuario_alta", "aceptado", usuario.Id, null, null, registroDto.Password);
-            await _context.SaveChangesAsync();
+            await AuditarAsync(bootstrap ? "usuario_bootstrap" : "usuario_alta", "aceptado", usuario.Id, null, null);
 
             return CrearRespuesta(usuario);
         }
@@ -178,9 +180,8 @@ namespace ControlFichajes.API.Services
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
             usuario.TokenVersion++;
-            Auditar("password_reset_admin", "aceptado", usuario.Id, null, null, passwordTemporal);
-
             await _context.SaveChangesAsync();
+            await AuditarAsync("password_reset_admin", "aceptado", usuario.Id, null, null);
 
             return new RestablecerPasswordResponseDto
             {
@@ -228,9 +229,8 @@ namespace ControlFichajes.API.Services
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
             usuario.TokenVersion++;
-            Auditar("password_cambio", "aceptado", usuario.Id, null, null, request.PasswordActual, request.NuevaPassword);
-
             await _context.SaveChangesAsync();
+            await AuditarAsync("password_cambio", "aceptado", usuario.Id, null, null);
             return true;
         }
 
@@ -244,6 +244,7 @@ namespace ControlFichajes.API.Services
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
             await _context.SaveChangesAsync();
+            await AuditarAsync("usuario_desbloqueo", "aceptado", usuario.Id, null, null);
             return true;
         }
 
@@ -258,8 +259,8 @@ namespace ControlFichajes.API.Services
 
             usuario.Activo = activo;
             usuario.TokenVersion++;
-            Auditar("usuario_estado", "aceptado", usuario.Id, null, activo ? "activo" : "inactivo");
             await _context.SaveChangesAsync();
+            await AuditarAsync("usuario_estado", "aceptado", usuario.Id, null, activo ? "activo" : "inactivo");
             return ToListItem(usuario);
         }
 
@@ -277,8 +278,8 @@ namespace ControlFichajes.API.Services
 
             usuario.Rol = rolNormalizado;
             usuario.TokenVersion++;
-            Auditar("usuario_rol", "aceptado", usuario.Id, null, "rol=" + rolNormalizado);
             await _context.SaveChangesAsync();
+            await AuditarAsync("usuario_rol", "aceptado", usuario.Id, null, "rol=" + rolNormalizado);
             return ToListItem(usuario);
         }
 
@@ -309,8 +310,8 @@ namespace ControlFichajes.API.Services
             usuario.NombreUsuario = nombreUsuario!;
             usuario.Correo = correoNormalizado;
             usuario.TokenVersion++;
-            Auditar("usuario_identidad", "aceptado", usuario.Id, null, "identidad");
             await _context.SaveChangesAsync();
+            await AuditarAsync("usuario_identidad", "aceptado", usuario.Id, null, "identidad");
             return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
         }
 
@@ -393,43 +394,27 @@ namespace ControlFichajes.API.Services
                 usuario.PasswordTemporalVenceEn.Value > ahora;
         }
 
-        private void Auditar(
+        private async Task AuditarAsync(
             string evento,
             string resultado,
             int? usuarioId,
             string? correo,
-            string? detalle,
-            params string[] secretos)
+            string? detalle)
         {
-            var http = _httpContextAccessor?.HttpContext;
-            var agente = http?.Request.Headers.UserAgent.ToString();
-            _context.AuditoriaSeguridad.Add(new AuditoriaSeguridad
-            {
-                FechaUtc = DateTime.UtcNow,
-                UsuarioId = usuarioId,
-                Correo = Limpiar(correo, 100, secretos),
-                Evento = Limpiar(evento, 60, secretos) ?? "evento",
-                Resultado = Limpiar(resultado, 20, secretos) ?? "aceptado",
-                Ip = Limpiar(http?.Connection.RemoteIpAddress?.ToString(), 64, secretos),
-                UserAgent = Limpiar(agente, 256, secretos),
-                Detalle = Limpiar(detalle, 300, secretos)
-            });
-        }
+            if (_auditoria == null)
+                return;
 
-        private static string? Limpiar(string? valor, int maximo, IReadOnlyList<string> secretos)
-        {
-            if (string.IsNullOrWhiteSpace(valor))
-                return null;
-
-            var limpio = valor.Trim();
-            foreach (var secreto in secretos)
+            try
             {
-                if (!string.IsNullOrEmpty(secreto) &&
-                    limpio.Contains(secreto, StringComparison.Ordinal))
-                    return null;
+                await _auditoria.RegistrarAsync(evento, resultado, usuarioId, correo, detalle);
             }
-
-            return limpio.Length <= maximo ? limpio : limpio[..maximo];
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(
+                    "No se pudo registrar la auditoría de seguridad. Evento={Evento} Excepcion={Excepcion}",
+                    evento,
+                    ex.GetType().Name);
+            }
         }
 
         private AuthResponseDto CrearRespuesta(Usuario usuario)
