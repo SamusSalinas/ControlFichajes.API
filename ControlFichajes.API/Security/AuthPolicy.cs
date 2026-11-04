@@ -42,9 +42,29 @@ public static class AuthPolicy
         return LeerEntero(configuration, "Auth:AceptacionVentanaSegundos", 60, minimo: 1);
     }
 
-    public static int RecuperacionHoras(IConfiguration? configuration)
+    public static int RecuperacionMinutos(IConfiguration? configuration)
     {
-        return LeerEntero(configuration, "Auth:RecuperacionHoras", 1, minimo: 1);
+        return LeerEntero(configuration, "Auth:RecuperacionMinutos", 30, minimo: 1);
+    }
+
+    public static int RecuperacionSolicitudLimite(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:RecuperacionSolicitudLimite", 5, minimo: 1);
+    }
+
+    public static int RecuperacionSolicitudVentanaSegundos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:RecuperacionSolicitudVentanaSegundos", 60, minimo: 1);
+    }
+
+    public static int RecuperacionRestablecerLimite(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:RecuperacionRestablecerLimite", 5, minimo: 1);
+    }
+
+    public static int RecuperacionRestablecerVentanaSegundos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:RecuperacionRestablecerVentanaSegundos", 60, minimo: 1);
     }
 
     public static int RefreshExpireDays(IConfiguration? configuration)

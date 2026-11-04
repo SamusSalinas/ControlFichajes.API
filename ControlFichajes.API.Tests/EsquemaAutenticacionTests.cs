@@ -184,7 +184,11 @@ public class EsquemaAutenticacionTests
         Assert.Equal(72, AuthPolicy.InvitacionHoras(vacia));
         Assert.Equal(5, AuthPolicy.AceptacionLimite(vacia));
         Assert.Equal(60, AuthPolicy.AceptacionVentanaSegundos(vacia));
-        Assert.Equal(1, AuthPolicy.RecuperacionHoras(vacia));
+        Assert.Equal(30, AuthPolicy.RecuperacionMinutos(vacia));
+        Assert.Equal(5, AuthPolicy.RecuperacionSolicitudLimite(vacia));
+        Assert.Equal(60, AuthPolicy.RecuperacionSolicitudVentanaSegundos(vacia));
+        Assert.Equal(5, AuthPolicy.RecuperacionRestablecerLimite(vacia));
+        Assert.Equal(60, AuthPolicy.RecuperacionRestablecerVentanaSegundos(vacia));
         Assert.Equal(14, AuthPolicy.RefreshExpireDays(vacia));
         Assert.Null(AuthPolicy.UrlPublica(vacia));
 

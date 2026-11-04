@@ -30,7 +30,13 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "invitacion_envio_aceptado",
         "invitacion_envio_fallido",
         "invitacion_aceptada",
-        "invitacion_aceptacion_rechazada"
+        "invitacion_aceptacion_rechazada",
+        "recuperacion_solicitada",
+        "recuperacion_invalidada",
+        "recuperacion_envio_aceptado",
+        "recuperacion_envio_fallido",
+        "recuperacion_restablecida",
+        "recuperacion_restablecimiento_rechazado"
     };
 
     private static readonly HashSet<string> Resultados = new(StringComparer.Ordinal)
@@ -48,6 +54,7 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "rol=ADMIN",
         "rol=RRHH",
         "invitacion_anterior",
+        "recuperacion_anterior",
         "smtp"
     };
 

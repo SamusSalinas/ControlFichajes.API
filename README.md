@@ -133,6 +133,64 @@ de ASP.NET Core, sin un paquete nuevo: 5 solicitudes por 60 segundos y por
 dirección IP. Al superarlo responde `429`. Los logs y la auditoría no guardan
 el token, la contraseña, la confirmación, el enlace ni el cuerpo.
 
+### Recuperación de contraseña
+
+La tabla `RecuperacionPassword` ya estaba en el esquema. No se agrega migración.
+`Auth:RecuperacionHoras` era un valor de reserva, de una hora, que ningún flujo
+leía. La expiración efectiva es `Auth:RecuperacionMinutos`, con valor inicial
+de 30 minutos.
+
+`POST /api/Auth/recuperacion/solicitar` es anónimo y recibe el correo. Se recorta,
+se pasa a minúsculas y se valida el formato. Un formato inválido responde `400`
+sin repetir el valor. Un formato válido responde siempre `200` con el mismo
+mensaje, exista o no la cuenta, esté inactiva, no tenga el correo verificado o
+falle el SMTP. Solo una cuenta activa con `CorreoVerificadoEn` genera un token.
+La recuperación no activa cuentas ni reemplaza la aceptación de una invitación.
+El correo guardado no se reescribe: la búsqueda no distingue mayúsculas.
+
+El token sale de `TokenOpaco`: 32 bytes de `RandomNumberGenerator`, Base64
+url-safe. En la base queda solo el SHA-256. Una solicitud nueva vence las
+recuperaciones vigentes anteriores del mismo usuario. Eso ocurre en una
+transacción con `SELECT ... FOR UPDATE` sobre la fila de `Usuario`, el mismo
+bloqueo que usa la invitación, así varias instancias quedan en serie. El hash
+se confirma vigente antes de abrir SMTP. El envío queda fuera de la transacción.
+Si el envío falla, el hash permanece, se audita el fallo y la respuesta pública
+sigue siendo la genérica. El enlace usa `App:PublicBaseUrl` y
+`/restablecer-contrasena`. El mensaje tiene texto y HTML. `ICorreoSaliente`
+hace el envío.
+
+`POST /api/Auth/recuperacion/restablecer` es anónimo. El cuerpo solo trae el
+token, la contraseña y su confirmación. La cuenta sale del hash del token.
+`PasswordPolitica` y `PasswordHasher<Usuario>` son los mismos de la aceptación.
+Dentro de la transacción se bloquea la fila, se relee el estado y solo entonces
+se guarda el hash, se marca la recuperación usada, se vencen las otras vigentes
+y `RequiereCambioPassword` queda en falso. Empresa y rol no cambian. El éxito
+es solo un mensaje: no inicia sesión.
+
+Ese guardado incrementa `TokenVersion`. El middleware web compara el claim
+`token_version` y rechaza el JWT anterior. El token de `Auth/agente` no lleva
+`token_version` y ese middleware no lo evalúa contra `Usuario`, así que su
+contrato no cambia y no se agrega otro registro de sesiones.
+
+Si la solicitud obtiene el bloqueo antes que el restablecimiento, el token
+anterior vence y ese restablecimiento se rechaza: la contraseña y
+`TokenVersion` quedan como estaban. Si el restablecimiento lo obtiene antes,
+la contraseña cambia, el token queda usado y `TokenVersion` aumenta; una
+solicitud que entre después emite otro token para la cuenta, que sigue activa.
+Dos restablecimientos del mismo token dejan un solo éxito. Un fallo antes del
+commit no cambia contraseña, token ni `TokenVersion`.
+
+Un token inexistente, vencido, usado, invalidado o de una cuenta que ya no está
+activa y verificada devuelve el mismo `400`. Un token de invitación no
+restablece la contraseña y uno de recuperación no acepta una invitación.
+
+La solicitud y el restablecimiento tienen límites propios, por dirección IP:
+5 por 60 segundos cada uno (`Auth:RecuperacionSolicitudLimite`,
+`Auth:RecuperacionSolicitudVentanaSegundos`, `Auth:RecuperacionRestablecerLimite`
+y `Auth:RecuperacionRestablecerVentanaSegundos`). Al superarlos responden `429`.
+La auditoría registra la solicitud, la invalidación, el envío aceptado o fallido
+y el restablecimiento. No guarda token, contraseña, confirmación, enlace ni cuerpo.
+
 ### Alta inicial de SuperAdmin
 
 Esta cuenta no se crea por un endpoint público. La inserta un administrador de

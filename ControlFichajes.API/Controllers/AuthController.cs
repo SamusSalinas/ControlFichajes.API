@@ -20,8 +20,12 @@ namespace ControlFichajes.API.Controllers
         private readonly IAuditoriaSeguridad? _auditoria;
         private readonly ILogger<AuthController>? _logger;
         private readonly IInvitacionUsuarioService? _invitaciones;
+        private readonly IRecuperacionPasswordService? _recuperacion;
 
         public const string PoliticaLimiteAceptacion = "aceptar-invitacion";
+        public const string PoliticaLimiteRecuperacionSolicitud = "recuperacion-solicitar";
+        public const string PoliticaLimiteRecuperacionRestablecer = "recuperacion-restablecer";
+        public const string MensajeRecuperacionSolicitada = "Si la cuenta puede recuperar su contraseña, recibirás las instrucciones.";
 
         public AuthController(
             IAuthService authService,
@@ -29,7 +33,8 @@ namespace ControlFichajes.API.Controllers
             IConfiguration? configuration = null,
             IAuditoriaSeguridad? auditoria = null,
             ILogger<AuthController>? logger = null,
-            IInvitacionUsuarioService? invitaciones = null)
+            IInvitacionUsuarioService? invitaciones = null,
+            IRecuperacionPasswordService? recuperacion = null)
         {
             _authService = authService;
             _agenteAuthService = agenteAuthService;
@@ -37,6 +42,7 @@ namespace ControlFichajes.API.Controllers
             _auditoria = auditoria;
             _logger = logger;
             _invitaciones = invitaciones;
+            _recuperacion = recuperacion;
         }
 
         [HttpPost("Login")]
@@ -100,6 +106,46 @@ namespace ControlFichajes.API.Controllers
                 EstadoAceptacion.Aceptada => Ok(new { mensaje = "Invitación aceptada. Ya podés iniciar sesión." }),
                 EstadoAceptacion.Error => StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo aceptar la invitación." }),
                 _ => BadRequest(new { mensaje = "La invitación no es válida." })
+            };
+        }
+
+        [HttpPost("recuperacion/solicitar")]
+        [AllowAnonymous]
+        [EnableRateLimiting(PoliticaLimiteRecuperacionSolicitud)]
+        public async Task<IActionResult> SolicitarRecuperacion([FromBody] SolicitarRecuperacionDto? request)
+        {
+            var correo = CorreoNormalizado.ParaRecuperacion(request?.Correo);
+            if (correo == null)
+                return BadRequest(new { mensaje = "El correo no es válido." });
+
+            if (_recuperacion == null)
+                return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo procesar la solicitud." });
+
+            await _recuperacion.SolicitarAsync(correo);
+            return Ok(new { mensaje = MensajeRecuperacionSolicitada });
+        }
+
+        [HttpPost("recuperacion/restablecer")]
+        [AllowAnonymous]
+        [EnableRateLimiting(PoliticaLimiteRecuperacionRestablecer)]
+        public async Task<IActionResult> RestablecerPassword([FromBody] RestablecerPasswordDto? request)
+        {
+            if (request == null
+                || !PasswordPolitica.EsElegible(request.Password)
+                || !string.Equals(request.Password, request.ConfirmarPassword, StringComparison.Ordinal))
+            {
+                return BadRequest(new { mensaje = "La contraseña no cumple las reglas o no coincide." });
+            }
+
+            if (_recuperacion == null)
+                return StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo restablecer la contraseña." });
+
+            var resultado = await _recuperacion.RestablecerAsync(request.Token, request.Password);
+            return resultado.Estado switch
+            {
+                EstadoRestablecimiento.Restablecida => Ok(new { mensaje = "Contraseña restablecida. Ya podés iniciar sesión." }),
+                EstadoRestablecimiento.Error => StatusCode(StatusCodes.Status500InternalServerError, new { mensaje = "No se pudo restablecer la contraseña." }),
+                _ => BadRequest(new { mensaje = "La recuperación no es válida." })
             };
         }
 

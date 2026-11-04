@@ -35,6 +35,24 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromSeconds(AuthPolicy.AceptacionVentanaSegundos(builder.Configuration)),
                 QueueLimit = 0
             }));
+    options.AddPolicy(AuthController.PoliticaLimiteRecuperacionSolicitud, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.RecuperacionSolicitudLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.RecuperacionSolicitudVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(AuthController.PoliticaLimiteRecuperacionRestablecer, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.RecuperacionRestablecerLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.RecuperacionRestablecerVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
 });
 builder.Services.AddHttpContextAccessor();
 
@@ -72,6 +90,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ICorreoSaliente, MailKitCorreoSaliente>();
 builder.Services.AddScoped<IInvitacionUsuarioService, InvitacionUsuarioService>();
+builder.Services.AddScoped<IRecuperacionPasswordService, RecuperacionPasswordService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
 builder.Services.AddScoped<IAgenteAuthService, AgenteAuthService>();
 builder.Services.AddScoped<IAgenteAdminService, AgenteAdminService>();
