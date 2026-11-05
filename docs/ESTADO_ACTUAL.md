@@ -1,6 +1,6 @@
 # Estado actual
 
-La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 5B es `0aa14677401352349bcc06deed76c8fd3e72950e`. La etapa 6A, refresh rotativo, es `e5df9ba2e5f55326faf07e52046c2ea933442377`. La etapa 6A.1, cookie por generación, queda en el commit que actualiza esa continuidad, al 4 de noviembre de 2026. Ese documento no reemplaza el cierre de turnos de abajo.
+La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 6A.1, cookie por generación, es `79d395dc8e16052db5b8fd8e6a9214c643df9046`. La etapa 6C, access renovable de 15 minutos, queda en el commit que actualiza esa continuidad, al 4 de noviembre de 2026. El frontend de 6B está integrado en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26` y no se modificó. Ese documento no reemplaza el cierre de turnos de abajo.
 
 Cierre de la noche del 2 de noviembre de 2026. No se desplegó ni se mergeó a `main`.
 

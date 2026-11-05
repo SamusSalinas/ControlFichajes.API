@@ -203,6 +203,7 @@ public class EsquemaAutenticacionTests
         Assert.Equal(60, AuthPolicy.RecuperacionSolicitudVentanaSegundos(vacia));
         Assert.Equal(5, AuthPolicy.RecuperacionRestablecerLimite(vacia));
         Assert.Equal(60, AuthPolicy.RecuperacionRestablecerVentanaSegundos(vacia));
+        Assert.Equal(15, AuthPolicy.AccessExpireMinutes(vacia));
         Assert.Equal(14, AuthPolicy.RefreshExpireDays(vacia));
         Assert.Equal(12, AuthPolicy.RefreshInactividadHoras(vacia));
         Assert.Equal(30, AuthPolicy.RefreshLimite(vacia));
@@ -276,6 +277,65 @@ public class EsquemaAutenticacionTests
         Assert.Equal("AGENTE_SUCURSAL", jwt.Claims.Single(c => c.Type == "role").Value);
         Assert.DoesNotContain(jwt.Claims, c => c.Type == "token_version");
         Assert.InRange(MinutosHasta(token), 55, 65);
+    }
+
+    [Fact]
+    public void AccessRenovable_UsaAccessExpireMinutes()
+    {
+        var configuration = ConfiguracionJwt(expireMinutes: "1440", accessMinutes: "15", agentMinutes: "15");
+        var service = new JwtTokenService(configuration);
+        var usuario = UsuarioDePrueba();
+
+        var token = service.CreateToken(usuario, Guid.NewGuid().ToString());
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        Assert.Equal("web", jwt.Claims.Single(c => c.Type == "token_use").Value);
+        Assert.False(string.IsNullOrWhiteSpace(jwt.Claims.Single(c => c.Type == "sid").Value));
+        Assert.InRange(MinutosHasta(token), 14, 16);
+
+        var configurado = new JwtTokenService(ConfiguracionJwt(expireMinutes: "1440", accessMinutes: "20", agentMinutes: "15"))
+            .CreateToken(usuario, Guid.NewGuid().ToString());
+        Assert.InRange(MinutosHasta(configurado), 19, 21);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0")]
+    [InlineData("-4")]
+    [InlineData("quince")]
+    [InlineData("15.5")]
+    public void AccessExpireMinutes_AusenteOInvalido_UsaQuince(string? minutos)
+    {
+        var datos = new Dictionary<string, string?>
+        {
+            ["Jwt:Key"] = "clave-super-secreta-de-pruebas-1234567890",
+            ["Jwt:Issuer"] = "ControlFichajes.Tests",
+            ["Jwt:Audience"] = "ControlFichajes.Frontend.Tests",
+            ["Jwt:ExpireMinutes"] = "1440"
+        };
+        if (minutos != null)
+            datos["Jwt:AccessExpireMinutes"] = minutos;
+
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(datos).Build();
+        var token = new JwtTokenService(configuration).CreateToken(UsuarioDePrueba(), Guid.NewGuid().ToString());
+
+        Assert.Equal(15, AuthPolicy.AccessExpireMinutes(configuration));
+        Assert.InRange(MinutosHasta(token), 14, 16);
+    }
+
+    private static Usuario UsuarioDePrueba()
+    {
+        return new Usuario
+        {
+            Id = 6,
+            EmpresaId = 1,
+            NombreUsuario = "super.local",
+            Correo = "super.local@local.test",
+            Rol = "RRHH",
+            Activo = true,
+            TokenVersion = 3
+        };
     }
 
     private static AppDbContext CrearContextoConEmpresa()

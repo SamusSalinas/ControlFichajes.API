@@ -85,6 +85,7 @@ public class SesionWebTests
         Assert.Equal("agent", jwt.Claims.Single(c => c.Type == "token_use").Value);
         Assert.Equal("AGENTE_SUCURSAL", jwt.Claims.Single(c => c.Type == "role").Value);
         Assert.DoesNotContain(jwt.Claims, c => c.Type is "sid" or "token_version");
+        Assert.InRange(Minutos(token), 55, 65);
         Assert.False(http.Response.Headers.ContainsKey("Set-Cookie"));
         Assert.Equal(0, await context.RefreshToken.CountAsync());
 
@@ -116,6 +117,7 @@ public class SesionWebTests
         var body = Assert.IsType<AuthResponseDto>(Assert.IsType<OkObjectResult>(result).Value);
         Assert.Equal(["mensaje", "requiereCambioPassword", "token"], Nombres(body));
         Assert.Equal("Autenticación exitosa", body.Mensaje);
+        Assert.InRange(Minutos(body.Token), 14, 16);
         var sid = Leer(body.Token).Claims.Single(c => c.Type == "sid").Value;
         var fila = Assert.Single(await context.RefreshToken.ToListAsync());
         Assert.Equal(sid, fila.FamiliaId.ToString());
@@ -165,7 +167,7 @@ public class SesionWebTests
         Assert.InRange((filas[1].ExpiraEn - absoluto).TotalSeconds, -2, 2);
         Assert.True(filas[1].ExpiraEn < DateTime.UtcNow.AddHours(12));
         Assert.Equal(filas[0].FamiliaId.ToString(), Leer(rotada.Respuesta!.Token).Claims.Single(c => c.Type == "sid").Value);
-        Assert.InRange(Minutos(rotada.Respuesta.Token), 55, 65);
+        Assert.InRange(Minutos(rotada.Respuesta.Token), 14, 16);
     }
 
     [Fact]

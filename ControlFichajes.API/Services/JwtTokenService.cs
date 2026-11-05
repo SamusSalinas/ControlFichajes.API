@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using ControlFichajes.API.Constants;
 using ControlFichajes.API.Models;
+using ControlFichajes.API.Security;
 using Microsoft.IdentityModel.Tokens;
 
 namespace ControlFichajes.API.Services;
@@ -25,14 +26,15 @@ public sealed class JwtTokenService : ITokenService
     {
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(GetRequiredConfiguration("Jwt:Key"));
+        var renovable = !string.IsNullOrWhiteSpace(sesionId);
         var claims = CreateClaims(usuario);
-        if (!string.IsNullOrWhiteSpace(sesionId))
-            claims.Add(new Claim("sid", sesionId));
+        if (renovable)
+            claims.Add(new Claim("sid", sesionId!));
 
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(GetExpirationMinutes()),
+            Expires = DateTime.UtcNow.AddMinutes(GetExpirationMinutes(renovable)),
             Issuer = GetRequiredConfiguration("Jwt:Issuer"),
             Audience = GetRequiredConfiguration("Jwt:Audience"),
             SigningCredentials = new SigningCredentials(
@@ -59,8 +61,11 @@ public sealed class JwtTokenService : ITokenService
         return CreateSignedToken(claims);
     }
 
-    private double GetExpirationMinutes()
+    private double GetExpirationMinutes(bool renovable)
     {
+        if (renovable)
+            return AuthPolicy.AccessExpireMinutes(_configuration);
+
         return Convert.ToDouble(GetRequiredConfiguration("Jwt:ExpireMinutes"));
     }
 
@@ -70,7 +75,7 @@ public sealed class JwtTokenService : ITokenService
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(GetExpirationMinutes()),
+            Expires = DateTime.UtcNow.AddMinutes(GetExpirationMinutes(renovable: false)),
             Issuer = GetRequiredConfiguration("Jwt:Issuer"),
             Audience = GetRequiredConfiguration("Jwt:Audience"),
             SigningCredentials = new SigningCredentials(

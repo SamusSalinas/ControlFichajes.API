@@ -197,9 +197,13 @@ La tabla `RefreshToken` ya estaba en el esquema. No se agrega migración. `Famil
 absoluto es `Jwt:RefreshExpireDays`, 14 días desde `CreadaEn` de la primera fila
 de la familia. La inactividad es `Jwt:RefreshInactividadHoras`, 12 horas. Cada
 rotación deja `ExpiraEn` en el menor de esos dos plazos. Una rotación no mueve
-el inicio de la familia ni alarga el plazo absoluto. El access token sigue en
-`Jwt:ExpireMinutes` hasta que el frontend consuma el refresh. `Jwt:AgentExpireMinutes`
-sigue sin leerse.
+el inicio de la familia ni alarga el plazo absoluto. El access con `sid`, tanto
+en el login renovable como en cada refresh, dura `Jwt:AccessExpireMinutes`. El
+valor versionado es 15. Si falta, está vacío o no es un entero positivo, también
+queda en 15 y no hereda `Jwt:ExpireMinutes`. El login tradicional, sin `sid`, y
+`POST /api/Auth/agente` siguen en `Jwt:ExpireMinutes`. `Jwt:AgentExpireMinutes`
+sigue sin leerse. `Jwt:RefreshExpireDays` y `Jwt:RefreshInactividadHoras` no
+cambian.
 
 `POST /api/Auth/Login` sin `X-CF-Solicitud` responde igual que antes y no crea
 una familia ni escribe la cookie. Si el encabezado está presente y no vale `1`,
@@ -1095,7 +1099,8 @@ Ejemplo de estructura:
     "Key": "REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA",
     "Issuer": "ControlFichajes.API.Local",
     "Audience": "ControlFichajes.Frontend.Local",
-    "ExpireMinutes": "60"
+    "ExpireMinutes": "60",
+    "AccessExpireMinutes": "15"
   },
   "Cors": {
     "AllowedOrigins": [
@@ -1270,6 +1275,7 @@ Jwt__Key=REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA
 Jwt__Issuer=ControlFichajes.API
 Jwt__Audience=ControlFichajes.Frontend
 Jwt__ExpireMinutes=60
+Jwt__AccessExpireMinutes=15
 
 Cors__AllowedOrigins__0=http://localhost:5173
 ```
@@ -1328,6 +1334,7 @@ Jwt__Key
 Jwt__Issuer
 Jwt__Audience
 Jwt__ExpireMinutes
+Jwt__AccessExpireMinutes
 Cors__AllowedOrigins__0
 ```
 
@@ -1408,6 +1415,7 @@ Jwt__Key=REEMPLAZAR_POR_UNA_CLAVE_LARGA_Y_SEGURA
 Jwt__Issuer=ControlFichajes.API
 Jwt__Audience=ControlFichajes.Frontend
 Jwt__ExpireMinutes=60
+Jwt__AccessExpireMinutes=15
 
 Cors__AllowedOrigins__0=http://localhost:5173
 ```

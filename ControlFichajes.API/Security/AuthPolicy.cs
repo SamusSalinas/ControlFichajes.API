@@ -67,6 +67,11 @@ public static class AuthPolicy
         return LeerEntero(configuration, "Auth:RecuperacionRestablecerVentanaSegundos", 60, minimo: 1);
     }
 
+    public static int AccessExpireMinutes(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Jwt:AccessExpireMinutes", 15, minimo: 1);
+    }
+
     public static int RefreshExpireDays(IConfiguration? configuration)
     {
         return LeerEntero(configuration, "Jwt:RefreshExpireDays", 14, minimo: 1);

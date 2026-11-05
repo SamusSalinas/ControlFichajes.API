@@ -32,13 +32,14 @@ Todas quedaron en commits locales. El usuario las declaró aprobadas y respaldad
 | 5A. Aceptación y contraseña | `c3dad96096fc205e008c86a493f2cd092508b09a` | `feat: acepta la invitación y deja la contraseña elegida sin iniciar sesión` |
 | 5B. Recuperación | `0aa14677401352349bcc06deed76c8fd3e72950e` | `feat: recupera la contraseña por correo sin iniciar sesión` |
 | 6A. Refresh rotativo | `e5df9ba2e5f55326faf07e52046c2ea933442377` | `feat: rota la sesión web y la revoca al cierre` |
-| 6A.1. Cookie por generación | este commit | ver el mensaje del commit |
+| 6A.1. Cookie por generación | `79d395dc8e16052db5b8fd8e6a9214c643df9046` | `feat: aísla la cookie de cada generación de sesión` |
+| 6C. Access corto | este commit | ver el mensaje del commit |
 
 La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b622662c36a4ebaffc9253eadd1834dfe`, ya no es el HEAD de la etapa: el hash vigente es `35653c7`. El padre sigue siendo `91ad7ba`.
 
 ## Contratos que se conservan
 
-`POST /api/Auth/Login` sigue respondiendo `token`, `mensaje` y `requiereCambioPassword`. La duración del access es `Jwt:ExpireMinutes`, hoy `1440` en `ControlFichajes.API/appsettings.json`.
+`POST /api/Auth/Login` sigue respondiendo `token`, `mensaje` y `requiereCambioPassword`. El login tradicional, sin `sid`, dura `Jwt:ExpireMinutes`, hoy `1440`. El login renovable y cada refresh, con `sid`, duran `Jwt:AccessExpireMinutes`, hoy `15`.
 
 `POST /api/Auth/agente` sigue respondiendo el mismo cuerpo. El JWT lleva `token_use=agent` y el rol `AGENTE_SUCURSAL`. No lleva `token_version`.
 
@@ -46,7 +47,7 @@ La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b62266
 
 `POST /api/Auth/bootstrap` responde `404` cuando `Auth:PermitirBootstrap` no está en `true`. En el `appsettings.json` versionado está en `false`.
 
-No se modificó el frontend. No se implementó MFA. La etapa 6A agrega la sesión web renovable en la API. El access token sigue en `Jwt:ExpireMinutes`.
+No se modificó el frontend en esta etapa. El frontend de la etapa 6B ya está integrado en su repositorio, commit `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. No se implementó MFA. La etapa 6C acorta solo el access de la sesión renovable.
 
 ## Endpoints de esta rama
 
@@ -97,7 +98,7 @@ Nombres versionados. Los secretos no van en este documento.
 
 `ControlFichajes.API/appsettings.json`:
 
-- `Jwt:Issuer`, `Jwt:Audience`, `Jwt:ExpireMinutes` (`1440`), `Jwt:RefreshExpireDays` (`14`). `Jwt:Key` no está en ese archivo.
+- `Jwt:Issuer`, `Jwt:Audience`, `Jwt:ExpireMinutes` (`1440`), `Jwt:AccessExpireMinutes` (`15`), `Jwt:RefreshExpireDays` (`14`). `Jwt:Key` no está en ese archivo.
 - `Auth:PermitirBootstrap` (`false`), `Auth:PermitirAltaConPassword` (`true`), `Auth:ExigirMfa` (`false`), `Auth:MfaGraciaDias` (`14`).
 - `Auth:InvitacionHoras` (`72`), `Auth:AceptacionLimite` (`5`), `Auth:AceptacionVentanaSegundos` (`60`).
 - `Auth:RecuperacionMinutos` (`30`), `Auth:RecuperacionSolicitudLimite` (`5`), `Auth:RecuperacionSolicitudVentanaSegundos` (`60`), `Auth:RecuperacionRestablecerLimite` (`5`), `Auth:RecuperacionRestablecerVentanaSegundos` (`60`).
@@ -213,9 +214,25 @@ La comprobación usó `System.Net.CookieContainer.SetCookies` contra la API reem
 
 La suite con la exclusión ya documentada, sobre este código, dejó 421 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas. No se habilitó `CFB_PRODUCTION_TEST_OPT_IN` ni `CFB_LOCAL_TEST_API_BASE_URL`. La advertencia `NU1902` de `MySqlConnector` 2.4.0 sigue igual.
 
+## Etapa 6C
+
+Acorta el access de la sesión web renovable. El padre es `79d395dc8e16052db5b8fd8e6a9214c643df9046`. No se modificó el frontend: la etapa 6B ya está integrada en `feat/autenticacion-sesiones-web`, commit `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. No se cambió el contrato JSON ni las cookies. No se implementó MFA.
+
+`JwtTokenService` sigue emitiendo todos los JWT. Si el access lleva `sid`, la duración es `Jwt:AccessExpireMinutes`. El valor versionado es 15 y lo usan el login renovable y cada refresh. Si la clave falta, está vacía, no es entera o no es positiva, queda en 15. No hereda `Jwt:ExpireMinutes`. El login tradicional, sin `sid`, y `POST /api/Auth/agente` siguen en `Jwt:ExpireMinutes` (`1440`). `Jwt:AgentExpireMinutes` sigue sin leerse. `Jwt:RefreshExpireDays` sigue en 14 y `Jwt:RefreshInactividadHoras` en 12.
+
+`Program.cs` no fija `ClockSkew`. El validador JWT de ASP.NET Core conserva la tolerancia predeterminada de 5 minutos: un access ya vencido sigue aceptado hasta `exp` más esos 5 minutos. La prueba de expiración real del laboratorio esperó esa tolerancia. No se cambió el reloj ni la clave de firma.
+
+`dotnet build` terminó con la advertencia conocida `NU1902`. La suite con la exclusión ya documentada dejó 428 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas. No se habilitó `CFB_PRODUCTION_TEST_OPT_IN` ni `CFB_LOCAL_TEST_API_BASE_URL`.
+
+La comprobación usó el frontend de 6B en `http://127.0.0.1:5173` y la API en `http://127.0.0.1:5088`. Con la configuración efectiva de 15, el access renovable del SuperAdmin ficticio midió 15 minutos entre `iat` y `exp`, con `sid`. El login tradicional midió 1440 y no llevó `sid`. Un agente temporal, desactivado al terminar, también midió 1440, con `token_use=agent` y sin `sid`.
+
+Para la expiración real, `appsettings.Development.local.json` tuvo `Jwt:AccessExpireMinutes` en 1. Ese archivo sigue ignorado por Git. El access midió 1 minuto. Se eligió Empresa Dos. Después de `exp` más la tolerancia de 5 minutos, la lectura del panel recibió 401, hizo un refresh y un solo reintento, y respondió 200. La otra pestaña no envió refresh. Quedaron el mismo usuario, el mismo `sid` y el contexto de empresa 2. La familia siguió con una fila vigente. Una escritura autenticada, ya vencida, se envió una sola vez: el refresh renovó la sesión y el cliente no repitió el POST.
+
+Al terminar se quitó el valor temporal. Un login renovable nuevo volvió a medir 15 minutos y la API quedó escuchando en `http://127.0.0.1:5088`.
+
 ## Próximo paso
 
-La etapa 6A.1 queda commiteada y comprobada en local. No integrar el frontend, no bajar la duración del access token y no generar un bundle. No avanzar a otra etapa hasta esa revisión.
+La etapa 6C queda para revisión. No generar un bundle y no avanzar a MFA.
 
 ## Texto para una conversación nueva
 
@@ -223,6 +240,6 @@ La etapa 6A.1 queda commiteada y comprobada en local. No integrar el frontend, n
 Leé api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md.
 Después comprobá el estado real: rama, git status, git rev-parse HEAD y git rev-parse '@{upstream}'.
 No continúes si la rama no es `feat/autenticacion-segura` o si el árbol no está limpio. No hay upstream.
-La etapa 6A es e5df9ba2e5f55326faf07e52046c2ea933442377. La etapa 6A.1, cookie por generación, es el commit que actualiza este documento.
-No integres el frontend, no bajes la duración del access token, no generes un bundle y no avances a otra etapa.
+La etapa 6C acorta el access renovable a Jwt:AccessExpireMinutes. El frontend de 6B está en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26.
+No generes un bundle y no avances a MFA.
 ```
