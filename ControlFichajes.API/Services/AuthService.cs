@@ -17,26 +17,45 @@ namespace ControlFichajes.API.Services
         private readonly ITokenService _tokenService;
         private readonly IAuditoriaSeguridad? _auditoria;
         private readonly ILogger<AuthService>? _logger;
+        private readonly IConfiguration? _configuration;
+        private readonly IProtectorSecretosMfa? _protector;
+        private readonly ILimiteMfaPorIp? _limite;
 
         public AuthService(
             AppDbContext context,
             IPasswordHasher<Usuario> passwordHasher,
             ITokenService tokenService,
             IAuditoriaSeguridad? auditoria = null,
-            ILogger<AuthService>? logger = null)
+            ILogger<AuthService>? logger = null,
+            IConfiguration? configuration = null,
+            IProtectorSecretosMfa? protector = null,
+            ILimiteMfaPorIp? limite = null)
         {
             _context = context;
             _passwordHasher = passwordHasher;
             _tokenService = tokenService;
             _auditoria = auditoria;
             _logger = logger;
+            _configuration = configuration;
+            _protector = protector;
+            _limite = limite;
         }
 
         public async Task<AuthResponseDto?> LoginAsync(LoginRequestDto loginDto)
         {
+            var resultado = await IngresarAsync(loginDto, ModoSesionMfa.Tradicional, null, null);
+            return resultado.Estado == EstadoIngreso.Autenticado ? resultado.Respuesta : null;
+        }
+
+        public async Task<ResultadoIngreso> IngresarAsync(
+            LoginRequestDto loginDto,
+            string modo,
+            Guid? generacion,
+            string? ip)
+        {
             var correo = NormalizarCorreo(loginDto.Email);
             if (string.IsNullOrWhiteSpace(correo))
-                return null;
+                return Invalido();
 
             var usuario = await _context.Usuario
                 .FirstOrDefaultAsync(u => u.Correo == correo && u.Activo);
@@ -45,14 +64,14 @@ namespace ControlFichajes.API.Services
             {
                 await _context.SaveChangesAsync();
                 await AuditarAsync("login_fallido", "rechazado", null, correo, null);
-                return null;
+                return Invalido();
             }
 
             if (usuario.BloqueadoHasta.HasValue && usuario.BloqueadoHasta > DateTime.UtcNow)
             {
                 await _context.SaveChangesAsync();
                 await AuditarAsync("login_bloqueado", "rechazado", usuario.Id, null, null);
-                return null;
+                return Invalido();
             }
 
             var passwordResult = _passwordHasher.VerifyHashedPassword(
@@ -73,23 +92,78 @@ namespace ControlFichajes.API.Services
                 if (bloqueado)
                     await AuditarAsync("login_bloqueado", "rechazado", usuario.Id, null, null);
 
-                return null;
+                return Invalido();
             }
 
             if (usuario.RequiereCambioPassword && !PasswordTemporalVigente(usuario, DateTime.UtcNow))
             {
                 await _context.SaveChangesAsync();
                 await AuditarAsync("login_fallido", "rechazado", usuario.Id, null, "clave_temporal_vencida");
-                return null;
+                return Invalido();
             }
 
+            if (!usuario.TotpHabilitado)
+            {
+                usuario.IntentosFallidos = 0;
+                usuario.BloqueadoHasta = null;
+                usuario.UltimoIntentoFallido = null;
+                await _context.SaveChangesAsync();
+                await AuditarAsync("login_ok", "aceptado", usuario.Id, null, null);
+                return new ResultadoIngreso { Estado = EstadoIngreso.Autenticado, Respuesta = CrearRespuesta(usuario) };
+            }
+
+            if (_protector == null)
+                return new ResultadoIngreso { Estado = EstadoIngreso.NoDisponible };
+
+            var limite = _limite ?? new LimiteMfaPorIp();
+            if (!limite.Permitir(
+                    "emision",
+                    ip,
+                    AuthPolicy.MfaEmisionLimite(_configuration),
+                    TimeSpan.FromSeconds(AuthPolicy.MfaEmisionVentanaSegundos(_configuration))))
+            {
+                return new ResultadoIngreso { Estado = EstadoIngreso.Limitado };
+            }
+
+            var modoRegistrado = modo == ModoSesionMfa.Renovable
+                ? ModoSesionMfa.Renovable
+                : ModoSesionMfa.Tradicional;
+            var generacionRegistrada = modoRegistrado == ModoSesionMfa.Renovable ? generacion : null;
+            var ahora = DateTime.UtcNow;
+            var desafio = TokenOpaco.Crear();
             usuario.IntentosFallidos = 0;
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
+            var fila = new DesafioMfa
+            {
+                UsuarioId = usuario.Id,
+                TokenHash = TokenOpaco.Hash(desafio),
+                ExpiraEn = ahora.AddMinutes(AuthPolicy.MfaDesafioMinutos(_configuration)),
+                Proposito = ModoSesionMfa.PropositoLogin,
+                TokenVersion = usuario.TokenVersion,
+                Generacion = generacionRegistrada,
+                ModoSesion = modoRegistrado,
+                Intentos = 0
+            };
+            _context.DesafioMfa.Add(fila);
             await _context.SaveChangesAsync();
-            await AuditarAsync("login_ok", "aceptado", usuario.Id, null, null);
+            await AuditarAsync(
+                "mfa_desafio_emitido",
+                "aceptado",
+                usuario.Id,
+                null,
+                modoRegistrado);
+            return new ResultadoIngreso
+            {
+                Estado = EstadoIngreso.MfaRequerido,
+                Desafio = desafio,
+                ExpiraEn = fila.ExpiraEn
+            };
+        }
 
-            return CrearRespuesta(usuario);
+        private static ResultadoIngreso Invalido()
+        {
+            return new ResultadoIngreso { Estado = EstadoIngreso.Invalido };
         }
 
         public async Task<AuthResponseDto?> RegistrarUsuarioAsync(

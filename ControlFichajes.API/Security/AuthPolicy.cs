@@ -102,6 +102,46 @@ public static class AuthPolicy
         return LeerEntero(configuration, "Auth:CierreVentanaSegundos", 60, minimo: 1);
     }
 
+    public static int MfaDesafioMinutos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaDesafioMinutos", 5, minimo: 1);
+    }
+
+    public static int MfaIntentosDesafio(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaIntentosDesafio", 5, minimo: 1);
+    }
+
+    public static int MfaIntentosUsuario(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaIntentosUsuario", 5, minimo: 1);
+    }
+
+    public static int MfaBloqueoMinutos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaBloqueoMinutos", 5, minimo: 1);
+    }
+
+    public static int MfaEmisionLimite(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaEmisionLimite", 10, minimo: 1);
+    }
+
+    public static int MfaEmisionVentanaSegundos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaEmisionVentanaSegundos", 60, minimo: 1);
+    }
+
+    public static int MfaVerificacionLimite(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaVerificacionLimite", 10, minimo: 1);
+    }
+
+    public static int MfaVerificacionVentanaSegundos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaVerificacionVentanaSegundos", 60, minimo: 1);
+    }
+
     public static string? UrlPublica(IConfiguration? configuration)
     {
         var url = configuration?["App:PublicBaseUrl"]?.Trim();

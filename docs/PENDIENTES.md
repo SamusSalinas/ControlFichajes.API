@@ -2,8 +2,8 @@
 
 Autenticación, 4 de noviembre de 2026. El detalle está en `docs/CONTINUIDAD_AUTENTICACION.md`.
 
-- La etapa 7A persiste el secreto MFA cifrado y queda para revisión. No cambia el login, no abre el enrolamiento y no exige MFA. El frontend sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. No se generó un bundle.
-- Siguen pendientes el desafío de login, el enrolamiento, los códigos de recuperación y el restablecimiento administrativo de MFA.
+- La etapa 7B verifica el desafío TOTP en el login y queda para revisión. El frontend sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26` y todavía no presenta el desafío. No se generó un bundle.
+- Siguen pendientes el enrolamiento, la desactivación, el reemplazo, los códigos de recuperación y el restablecimiento administrativo de MFA.
 - Los bundles locales de 5A y 5B fueron verificados según las salidas de PowerShell aportadas por el usuario. Las rutas y los hashes están en `docs/CONTINUIDAD_AUTENTICACION.md`. La subida de ambos a Drive sigue pendiente de confirmación.
 
 Hechos abiertos al cierre de la noche del 2 de noviembre de 2026.

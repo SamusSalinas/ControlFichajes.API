@@ -34,7 +34,8 @@ Todas quedaron en commits locales. El usuario las declaró aprobadas y respaldad
 | 6A. Refresh rotativo | `e5df9ba2e5f55326faf07e52046c2ea933442377` | `feat: rota la sesión web y la revoca al cierre` |
 | 6A.1. Cookie por generación | `79d395dc8e16052db5b8fd8e6a9214c643df9046` | `feat: aísla la cookie de cada generación de sesión` |
 | 6C. Access corto | `234c75f7b2f10d95600e2270056e7c334867b6fe` | `feat: acorta el access de la sesión web renovable` |
-| 7A. Persistencia MFA | este commit | ver el mensaje del commit |
+| 7A. Persistencia MFA | `5dd60b94d221ea8ee88ba69be1e8cecb8af53bcc` | `feat: persiste el secreto MFA cifrado sin exigirlo` |
+| 7B. Desafío y TOTP | este commit | ver el mensaje del commit |
 
 La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b622662c36a4ebaffc9253eadd1834dfe`, ya no es el HEAD de la etapa: el hash vigente es `35653c7`. El padre sigue siendo `91ad7ba`.
 
@@ -48,7 +49,7 @@ La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b62266
 
 `POST /api/Auth/bootstrap` responde `404` cuando `Auth:PermitirBootstrap` no está en `true`. En el `appsettings.json` versionado está en `false`.
 
-No se modificó el frontend. Sigue en `feat/autenticacion-sesiones-web`, commit `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. La etapa 7A persiste y cifra el material de MFA, pero no cambia el login, no abre el enrolamiento y no exige MFA a ninguna cuenta.
+No se modificó el frontend. Sigue en `feat/autenticacion-sesiones-web`, commit `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. Todavía no presenta el desafío. La etapa 7B verifica TOTP solo en cuentas que ya tienen `TotpHabilitado`. El enrolamiento, la desactivación, el reemplazo y la administración siguen pendientes. Ninguna cuenta existente, incluido el SuperAdmin, quedó con MFA activado o obligatorio.
 
 ## Endpoints de esta rama
 
@@ -258,9 +259,27 @@ Decisiones que esta etapa registra y no implementa:
 - Cada código de recuperación tendrá 128 bits de entropía, se entregará una sola vez y solo se guardará su hash.
 - El token restringido de vinculación tendrá propósito y vencimiento propios, separados del JWT tradicional.
 
+## Etapa 7B
+
+Verifica el segundo factor de las cuentas que ya tienen `TotpHabilitado`. El padre es `5dd60b94d221ea8ee88ba69be1e8cecb8af53bcc`. No se modificó el frontend: sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26` y todavía no presenta el desafío. No se abrió el enrolamiento, la desactivación, el reemplazo ni la administración. No se activó MFA ni `MfaObligatorio` en el SuperAdmin ni en los usuarios existentes.
+
+Se agregó Otp.NET 1.4.1. NuGet lo declara compatible con todos los TFM del proyecto, incluido `net10.0`, y no trae dependencias. La documentación del paquete usa HMAC-SHA1, seis dígitos y 30 segundos como valores propios, pero su ventana predeterminada acepta solo el paso actual y `RfcSpecifiedNetworkDelay` acepta además un paso futuro. `ValidadorTotp` no usa ninguno de esos dos: fija `VerificationWindow(previous: 1, future: 0)`. Un paso anterior absorbe un autenticador o una red atrasados. Un paso futuro aceptaría un código que aún no es válido. Las pruebas cubren el paso actual, el anterior, el siguiente y el de 60 segundos atrás.
+
+Una contraseña correcta con MFA responde `401` y `codigo=mfa_requerido`, con desafío y vencimiento, sin mensaje de éxito, sin JWT, sin refresh y sin cookie. La contraseña incorrecta conserva el error genérico. El desafío tiene 256 bits, se guarda solo su SHA-256, vence a los cinco minutos y admite cinco intentos. Queda atado al usuario, a `TokenVersion`, al propósito `login`, al modo y a la generación. El modo tradicional guarda la generación nula. No es un JWT. Origin y encabezados se evalúan antes de insertarlo.
+
+`POST /api/Auth/mfa/verificar` es anónimo. El cliente no elige otro usuario, empresa, rol, modo ni generación. La transacción bloquea al usuario, relee desafío y cuenta, abre el secreto con `totp-activo` y exige un paso mayor que `UltimoPasoTotp`. El éxito confirma el paso, el consumo, los contadores y, en modo renovable, la familia. JWT y cookie salen después del commit. El tradicional conserva su duración. El renovable conserva `sid`, la cookie de la generación y el access de 15 minutos. Si la contraseña debe cambiarse, MFA se verifica primero y el middleware actual restringe la sesión.
+
+El usuario admite cinco fallos y después queda bloqueado cinco minutos. El contador vuelve a cero cuando una verificación ve que ese bloqueo ya venció, antes de contar el intento, o cuando MFA se completa. Otro desafío no lo reinicia. El fallo se confirma antes de responder. Por IP hay diez emisiones y diez verificaciones por minuto. El `429` no cuenta como código incorrecto. Clave ausente, desconocida o cifrado inválido responden `503` con `mfa_no_disponible`, no omiten MFA y no suman un fallo de código.
+
+Dos verificaciones del mismo desafío dejan un solo éxito. El mismo paso no se consume dos veces, tampoco entre dos sesiones distintas de MySQL: cada una abre su propio `DbContext` y el bloqueo es `FOR UPDATE`. Si la respuesta se pierde después del commit, el desafío queda consumido. La cookie sigue aislada por generación y `TokenVersion` sigue invalidando el access.
+
+`dotnet build` terminó con la advertencia conocida `NU1902`. La suite con la exclusión ya documentada dejó 454 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas.
+
+La clave de laboratorio está solo en `ControlFichajes.API/appsettings.Development.local.json`, en `Auth:TotpClaves`, identificador `lab7b`. El archivo sigue ignorado. No se reutilizó `Jwt:Key` ni se copió `Auth:TotpProtectionKey`. Hay que respaldarla con `Jwt:Key` antes de guardar un secreto real. Las pruebas no la imprimen. Una cuenta ficticia se creó y se borró en la base local; el SuperAdmin siguió sin secreto, sin MFA y sin obligación.
+
 ## Próximo paso
 
-La etapa 7A queda para revisión. No generar un bundle y no implementar el desafío, el enrolamiento ni el restablecimiento administrativo.
+La etapa 7B queda para revisión. El frontend todavía no presenta el desafío. El enrolamiento, la desactivación, el reemplazo y el restablecimiento administrativo siguen pendientes. No generar un bundle.
 
 ## Texto para una conversación nueva
 
@@ -268,6 +287,6 @@ La etapa 7A queda para revisión. No generar un bundle y no implementar el desaf
 Leé api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md.
 Después comprobá el estado real: rama, git status, git rev-parse HEAD y git rev-parse '@{upstream}'.
 No continúes si la rama no es `feat/autenticacion-segura` o si el árbol no está limpio. No hay upstream.
-La etapa 7A persiste y cifra MFA sin cambiar el login ni exigirlo. El frontend de 6B está en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26.
-No generes un bundle y no implementes el desafío ni el enrolamiento.
+La etapa 7B verifica TOTP en el login de las cuentas que ya lo tienen configurado. El frontend de 6B está en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26 y todavía no presenta el desafío.
+No generes un bundle y no implementes el enrolamiento.
 ```

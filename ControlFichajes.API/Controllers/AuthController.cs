@@ -25,6 +25,7 @@ namespace ControlFichajes.API.Controllers
         private readonly IRecuperacionPasswordService? _recuperacion;
         private readonly ISesionWebService? _sesiones;
         private readonly IHostEnvironment? _entorno;
+        private readonly IVerificacionMfaService? _mfa;
 
         public const string PoliticaLimiteAceptacion = "aceptar-invitacion";
         public const string PoliticaLimiteRecuperacionSolicitud = "recuperacion-solicitar";
@@ -42,7 +43,8 @@ namespace ControlFichajes.API.Controllers
             IInvitacionUsuarioService? invitaciones = null,
             IRecuperacionPasswordService? recuperacion = null,
             ISesionWebService? sesiones = null,
-            IHostEnvironment? entorno = null)
+            IHostEnvironment? entorno = null,
+            IVerificacionMfaService? mfa = null)
         {
             _authService = authService;
             _agenteAuthService = agenteAuthService;
@@ -53,6 +55,7 @@ namespace ControlFichajes.API.Controllers
             _recuperacion = recuperacion;
             _sesiones = sesiones;
             _entorno = entorno;
+            _mfa = mfa;
         }
 
         [HttpPost("Login")]
@@ -74,11 +77,67 @@ namespace ControlFichajes.API.Controllers
             if (generacion.Estado == EstadoGeneracionSesion.Valida && clase != ClaseSolicitudSesion.Renovable)
                 return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
 
-            var response = await LoginTradicionalAsync(request);
-            if (clase == ClaseSolicitudSesion.Tradicional || response is not OkObjectResult ok)
-                return response;
+            var modo = clase == ClaseSolicitudSesion.Renovable
+                ? ModoSesionMfa.Renovable
+                : ModoSesionMfa.Tradicional;
+            var ingreso = await _authService.IngresarAsync(request, modo, IdGeneracion(generacion), Ip());
+            if (ingreso.Estado == EstadoIngreso.MfaRequerido)
+            {
+                return Unauthorized(new
+                {
+                    codigo = "mfa_requerido",
+                    desafio = ingreso.Desafio,
+                    expiraEn = ingreso.ExpiraEn
+                });
+            }
 
-            return await EmitirSesionAsync((AuthResponseDto)ok.Value!, generacion);
+            if (ingreso.Estado == EstadoIngreso.Limitado)
+                return StatusCode(StatusCodes.Status429TooManyRequests, new { mensaje = "Demasiadas solicitudes. Intentá más tarde." });
+
+            if (ingreso.Estado == EstadoIngreso.NoDisponible)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "mfa_no_disponible" });
+
+            if (ingreso.Estado != EstadoIngreso.Autenticado || ingreso.Respuesta == null)
+                return Unauthorized(new { mensaje = "Credenciales incorrectas" });
+
+            if (clase == ClaseSolicitudSesion.Tradicional)
+                return Ok(ingreso.Respuesta);
+
+            return await EmitirSesionAsync(ingreso.Respuesta, generacion);
+        }
+
+        [HttpPost("mfa/verificar")]
+        [AllowAnonymous]
+        public async Task<IActionResult> VerificarMfa([FromBody] VerificarMfaDto? request)
+        {
+            SinCache();
+            var generacion = GeneracionSesion.Leer(Request);
+            if (generacion.Estado == EstadoGeneracionSesion.Invalida)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            var clase = ProteccionSolicitudSesion.Evaluar(Request, _configuration);
+            if (clase == ClaseSolicitudSesion.Rechazada)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            if (generacion.Estado == EstadoGeneracionSesion.Valida && clase != ClaseSolicitudSesion.Renovable)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            if (_mfa == null)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "mfa_no_disponible" });
+
+            var modo = clase == ClaseSolicitudSesion.Renovable
+                ? ModoSesionMfa.Renovable
+                : ModoSesionMfa.Tradicional;
+            var nombre = NombreCookie(generacion);
+            var resultado = await _mfa.VerificarAsync(
+                request?.Desafio,
+                request?.Codigo,
+                modo,
+                IdGeneracion(generacion),
+                Ip(),
+                AgenteUsuario(),
+                Request.Cookies[nombre]);
+            return ResponderMfa(resultado, generacion);
         }
 
         [HttpPost("refresh")]
@@ -252,6 +311,30 @@ namespace ControlFichajes.API.Controllers
             return ok
                 ? Ok(new { mensaje = "Contraseña cambiada correctamente." })
                 : BadRequest(new { mensaje = "No se pudo cambiar la contraseña." });
+        }
+
+        private IActionResult ResponderMfa(ResultadoVerificacionMfa resultado, LecturaGeneracionSesion generacion)
+        {
+            switch (resultado.Estado)
+            {
+                case EstadoVerificacionMfa.Limitado:
+                    return StatusCode(StatusCodes.Status429TooManyRequests, new { mensaje = "Demasiadas solicitudes. Intentá más tarde." });
+                case EstadoVerificacionMfa.NoDisponible:
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "mfa_no_disponible" });
+                case EstadoVerificacionMfa.Contexto:
+                    return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+                case EstadoVerificacionMfa.Bloqueado:
+                    return Unauthorized(new { codigo = "mfa_bloqueado" });
+                case EstadoVerificacionMfa.Error:
+                    return StatusCode(StatusCodes.Status500InternalServerError, new { codigo = "mfa_error" });
+                case EstadoVerificacionMfa.Emitido when resultado.Respuesta != null:
+                    if (resultado.Renovable && resultado.Refresh != null && resultado.ExpiraRefresh != null)
+                        EscribirCookie(NombreCookie(generacion), resultado.Refresh, resultado.ExpiraRefresh.Value);
+
+                    return Ok(resultado.Respuesta);
+                default:
+                    return Unauthorized(new { codigo = "mfa_invalido" });
+            }
         }
 
         private async Task<IActionResult> LoginTradicionalAsync(LoginRequestDto request)

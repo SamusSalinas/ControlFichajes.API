@@ -6,6 +6,7 @@ namespace   ControlFichajes.API.Services
     public interface IAuthService
     {
         Task<AuthResponseDto?> LoginAsync(LoginRequestDto loginDto);
+        Task<ResultadoIngreso> IngresarAsync(LoginRequestDto loginDto, string modo, Guid? generacion, string? ip);
         Task<AuthResponseDto?> RegistrarUsuarioAsync(UsuarioRegistroDto registroDto, bool bootstrap);
         Task<IEnumerable<UsuarioListItemDto>> ListarUsuariosAsync(int? empresaId, string? rol, string? nombreUsuario, string? correo, bool? activo);
         Task<Usuario?> GetUsuarioByIdAsync(int usuarioId);

@@ -238,6 +238,38 @@ public sealed class SesionWebService : ISesionWebService
         }
     }
 
+    internal async Task<ResultadoSesionWeb> AgregarFamiliaEnAlcanceAsync(
+        Usuario usuario,
+        string? refreshAnterior,
+        string? ip,
+        string? userAgent,
+        Guid? generacion,
+        CancellationToken cancellationToken = default)
+    {
+        if (generacion.HasValue && await _context.RefreshToken.AnyAsync(r => r.Generacion == generacion, cancellationToken))
+            return new ResultadoSesionWeb { Estado = EstadoSesionWeb.Rechazada };
+
+        var hashAnterior = generacion.HasValue ? null : HashSiHay(refreshAnterior);
+        if (hashAnterior != null)
+        {
+            var previa = await _context.RefreshToken
+                .SingleOrDefaultAsync(r => r.TokenHash == hashAnterior, cancellationToken);
+            if (previa != null && previa.UsuarioId == usuario.Id && previa.Generacion == null)
+                await RevocacionSesiones.MarcarFamiliaAsync(_context, usuario.Id, previa.FamiliaId, DateTime.UtcNow, cancellationToken);
+        }
+
+        var ahora = DateTime.UtcNow;
+        var fila = NuevaFila(usuario, ahora, ahora, ip, userAgent, generacion, out var refresh);
+        _context.RefreshToken.Add(fila);
+        return new ResultadoSesionWeb
+        {
+            Estado = EstadoSesionWeb.Emitida,
+            Refresh = refresh,
+            ExpiraEn = fila.ExpiraEn,
+            FamiliaId = fila.FamiliaId.ToString("D")
+        };
+    }
+
     private async Task<bool> RevocarFamiliaConfirmadaAsync(
         int usuarioId,
         Guid familiaId,
