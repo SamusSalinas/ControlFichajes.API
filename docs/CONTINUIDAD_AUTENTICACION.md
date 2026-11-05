@@ -36,7 +36,8 @@ Todas quedaron en commits locales. El usuario las declaró aprobadas y respaldad
 | 6C. Access corto | `234c75f7b2f10d95600e2270056e7c334867b6fe` | `feat: acorta el access de la sesión web renovable` |
 | 7A. Persistencia MFA | `5dd60b94d221ea8ee88ba69be1e8cecb8af53bcc` | `feat: persiste el secreto MFA cifrado sin exigirlo` |
 | 7B. Desafío y TOTP | `8e9d684235fb24aa485df8e1107241f858f58ea1` | `feat: exige TOTP cuando la cuenta ya tiene MFA` |
-| 7C.1. Enrolamiento voluntario | este commit | ver el mensaje del commit |
+| 7C.1. Enrolamiento voluntario | `da38172767fd8a9d5da69d4116e26389c355e1f4` | `feat: enrola MFA voluntario y entrega códigos de recuperación` |
+| Cierre 7C.1, pendiente de revisión | este commit | ver el mensaje del commit |
 
 La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b622662c36a4ebaffc9253eadd1834dfe`, ya no es el HEAD de la etapa: el hash vigente es `35653c7`. El padre sigue siendo `91ad7ba`.
 
@@ -50,7 +51,7 @@ La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b62266
 
 `POST /api/Auth/bootstrap` responde `404` cuando `Auth:PermitirBootstrap` no está en `true`. En el `appsettings.json` versionado está en `false`.
 
-No se modificó el frontend. Sigue en `feat/autenticacion-sesiones-web`, commit `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. Todavía no presenta el desafío. La etapa 7B verifica TOTP solo en cuentas que ya tienen `TotpHabilitado`. El enrolamiento, la desactivación, el reemplazo y la administración siguen pendientes. Ninguna cuenta existente, incluido el SuperAdmin, quedó con MFA activado o obligatorio.
+No se modificó el frontend. Sigue en `feat/autenticacion-sesiones-web`, commit `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. No presenta el desafío ni el enrolamiento. La etapa 7C.1 está implementada en la API y queda pendiente de revisión final. `Auth:PermitirEnrolamientoMfa` está en falso. Ninguna cuenta existente, incluido el SuperAdmin compartido, quedó con MFA activado o obligatorio.
 
 ## Endpoints de esta rama
 
@@ -102,7 +103,7 @@ Nombres versionados. Los secretos no van en este documento.
 `ControlFichajes.API/appsettings.json`:
 
 - `Jwt:Issuer`, `Jwt:Audience`, `Jwt:ExpireMinutes` (`1440`), `Jwt:AccessExpireMinutes` (`15`), `Jwt:RefreshExpireDays` (`14`). `Jwt:Key` no está en ese archivo.
-- `Auth:PermitirBootstrap` (`false`), `Auth:PermitirAltaConPassword` (`true`), `Auth:ExigirMfa` (`false`), `Auth:MfaGraciaDias` (`14`).
+- `Auth:PermitirBootstrap` (`false`), `Auth:PermitirAltaConPassword` (`true`), `Auth:ExigirMfa` (`false`), `Auth:PermitirEnrolamientoMfa` (`false`), `Auth:MfaGraciaDias` (`14`).
 - `Auth:InvitacionHoras` (`72`), `Auth:AceptacionLimite` (`5`), `Auth:AceptacionVentanaSegundos` (`60`).
 - `Auth:RecuperacionMinutos` (`30`), `Auth:RecuperacionSolicitudLimite` (`5`), `Auth:RecuperacionSolicitudVentanaSegundos` (`60`), `Auth:RecuperacionRestablecerLimite` (`5`), `Auth:RecuperacionRestablecerVentanaSegundos` (`60`).
 - `Smtp:Host`, `Smtp:Port` (`587`), `Smtp:User`, `Smtp:Password`, `Smtp:From`, `Smtp:EnableSsl` (`true`). En el archivo versionado el host, el usuario, la contraseña y el remitente están vacíos.
@@ -111,7 +112,7 @@ Nombres versionados. Los secretos no van en este documento.
 
 Los mismos nombres de entorno están en `ControlFichajes.API/.env.production.example`, con el prefijo de ASP.NET Core (`Auth__RecuperacionMinutos`, `Smtp__Host`, `App__PublicBaseUrl`).
 
-La configuración local no versionada es `ControlFichajes.API/appsettings.Development.local.json`. En el laboratorio, el SMTP efectivo apunta a `127.0.0.1`, puerto `1025`, sin SSL, y `App:PublicBaseUrl` es `http://127.0.0.1:5173`. No copiar ese archivo al repositorio.
+La configuración local no versionada es `ControlFichajes.API/appsettings.Development.local.json`. En el laboratorio, el SMTP efectivo apunta a `127.0.0.1`, puerto `1025`, sin SSL, y `App:PublicBaseUrl` es `http://127.0.0.1:5173`. Ahí también están `Jwt:Key` y `Auth:TotpClaves` (identificador `lab7b`). `Auth:TotpProtectionKey` sigue en ese archivo y no lo usa el cifrado actual. Esos valores no se copian a este documento, no están en Git y no entran en los bundles: el bundle guarda commits, y el archivo está ignorado. Hay que respaldarlo aparte, junto con la clave JWT, antes de guardar un secreto real. `Auth:PermitirEnrolamientoMfa` quedó en falso también en ese archivo local.
 
 Los límites de aceptación y de recuperación son ventanas fijas del limitador de ASP.NET Core, separadas por endpoint y por IP. Al superarlas la respuesta es `429` con el mensaje genérico. No se agregó un paquete NuGet para eso.
 
@@ -296,9 +297,59 @@ No hay dependencia nueva. La migración es `database/20261106_mfa_enrolamiento.s
 
 `dotnet build` terminó con la advertencia conocida `NU1902`. La suite con la exclusión ya documentada dejó 468 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas.
 
+## Cierre de jornada
+
+Comprobado antes de este texto, el 4 de noviembre de 2026:
+
+- API: `feat/autenticacion-segura`, `da38172767fd8a9d5da69d4116e26389c355e1f4`, árbol limpio, sin upstream.
+- Frontend: `feat/autenticacion-sesiones-web`, `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`, árbol limpio, sin upstream.
+- No se cambió código en este cierre. No se activó el enrolamiento. No se avanzó de etapa. No hubo push, fetch, pull ni subida a Drive.
+
+La etapa 7C.1 está implementada y pendiente de revisión final en ChatGPT. El commit funcional es `da38172767fd8a9d5da69d4116e26389c355e1f4`. La migración es `database/20261106_mfa_enrolamiento.sql`. No agregó dependencias. `dotnet build` terminó con la advertencia conocida `NU1902`. La suite `dotnet test ControlFichajes.API.Tests/ControlFichajes.API.Tests.csproj --filter "FullyQualifiedName!~LocalTunnelBiometricAcceptanceTests"` dejó 468 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas.
+
+Por HTTP, contra `http://127.0.0.1:5088` y MySQL local, una cuenta ficticia entró sin MFA, inició y confirmó el enrolamiento, recibió diez códigos y el mensaje para volver a entrar. El login siguiente respondió `401` con `mfa_requerido`, sin token y sin cookie. Un código de recuperación completó esa sesión y quedó consumido. La cuenta se borró. Con `Auth:PermitirEnrolamientoMfa` otra vez en falso, el inicio autenticado respondió `404`. El SuperAdmin compartido, id 6, siguió sin secreto, con `TotpHabilitado` y `MfaObligatorio` en falso.
+
+Solo tienen cobertura automatizada, no esa corrida HTTP: contraseña inválida, sesión de otro usuario, operación vencida, reemplazo del pendiente, separación de propósitos, paso de confirmación no reutilizable, bloqueo que sobrevive a otro inicio, confirmación concurrente, consumo concurrente del mismo código, código de otra cuenta, solicitud con TOTP y recuperación juntos, regeneración, rollback sin activación parcial, respuesta perdida y revocación de sesiones. La concurrencia entre dos sesiones de MySQL del desafío de 7B también sigue en la suite, no en esta comprobación HTTP.
+
+`Auth:PermitirEnrolamientoMfa` queda en falso en `appsettings.json`, en `.env.production.example` y en el archivo local. El frontend no tiene pantallas de desafío ni de enrolamiento.
+
+Siguen pendientes, sin implementarlos: exigir MFA al invitar, el token de vinculación restringida, la desactivación, el reemplazo del autenticador y la recuperación administrativa. Cuando se retomen, se conservan los permisos actuales. Invitar usa las mismas reglas de rol y empresa que el alta con contraseña: `PuedeCrearUsuarios` es ADMIN o SuperAdmin, y la empresa no se elige fuera del alcance que ya tiene esa alta. El SuperAdmin no queda atado a una empresa como el resto. El agente sigue en `token_use=agent` y no entra a estas rutas web. Un campo omitido en el alta tradicional no puede volverse un camino distinto. Exigir MFA en una cuenta ya creada, y el restablecimiento administrativo, piden un permiso explícito: no se infieren de poder crear usuarios ni amplían la empresa visible. El administrador no recibe el secreto ni los códigos de la persona.
+
+## Después de apagar la PC
+
+El contenedor se creó con `--restart no`. Si sigue existiendo:
+
+```powershell
+docker start cf-auth-mysql
+docker ps --filter name=cf-auth-mysql
+```
+
+Tiene que mostrar `127.0.0.1:3308->3306/tcp`. La base es `cf_auth_stage`. La contraseña de root sigue en el archivo temporal del laboratorio, no en Git. Si el contenedor no existe, el `docker run` de la sección Servicios locales lo crea de nuevo; no reutiliza un nombre que ya esté ocupado.
+
+La API, en su directorio y después de un build:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = 'Development'
+$env:ASPNETCORE_URLS = 'http://127.0.0.1:5088'
+dotnet run --project 'C:\Users\Tinchota\Documents\PROYECTOS\control-accesos-departamentos-20260921-105708\api\api-nueva-20261023\ControlFichajes.API\ControlFichajes.API.csproj' --no-launch-profile --no-build
+```
+
+`--no-launch-profile` evita el puerto `5052` de `launchSettings.json`. Hay que detener el proceso de `5088` antes de compilar.
+
+El frontend no se modificó. Su directorio es `C:\Users\Tinchota\Documents\PROYECTOS\control-accesos-departamentos-20260921-105708\frontend`. No hay `.env.local` en ese árbol. Sin la variable, Vite usa el fallback de `vite.config.js` y no apunta a esta API:
+
+```powershell
+$env:DEV_API_PROXY_TARGET = 'http://127.0.0.1:5088'
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+El capturador SMTP no está en el repositorio. La sección Capturador SMTP describe el `TcpListener` de `127.0.0.1:1025`. Los secretos que quedaron en `%TEMP%\cf-auth-lab` no se versionan y no van en los bundles.
+
+El bundle de este cierre es `C:\Users\Tinchota\Desktop\backups-control-fichajes\ControlFichajes-API-cierre-7c1-pendiente-revision.bundle`. Incluye el commit funcional y este commit de documentación. No incluye `appsettings.Development.local.json` ni las claves.
+
 ## Próximo paso
 
-La etapa 7C.1 queda para revisión. El frontend todavía no presenta el desafío ni el enrolamiento. Siguen pendientes la casilla de exigir MFA, el token de vinculación obligatoria, la desactivación, el reemplazo y el restablecimiento administrativo. No generar un bundle.
+Revisar únicamente la etapa 7C.1 antes de autorizar otra implementación. No implementar la obligación de MFA, la vinculación restringida, la desactivación, el reemplazo ni la recuperación administrativa. No activar `Auth:PermitirEnrolamientoMfa`.
 
 ## Texto para una conversación nueva
 
@@ -306,6 +357,6 @@ La etapa 7C.1 queda para revisión. El frontend todavía no presenta el desafío
 Leé api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md.
 Después comprobá el estado real: rama, git status, git rev-parse HEAD y git rev-parse '@{upstream}'.
 No continúes si la rama no es `feat/autenticacion-segura` o si el árbol no está limpio. No hay upstream.
-La etapa 7C.1 enrola MFA de forma voluntaria y emite códigos de recuperación, pero el enrolamiento queda apagado por configuración. El frontend de 6B está en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26.
-No generes un bundle y no implementes la obligación de MFA.
+La etapa 7C.1 está implementada en da38172767fd8a9d5da69d4116e26389c355e1f4 y pendiente de revisión final. Auth:PermitirEnrolamientoMfa queda en falso. El frontend sigue en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26, sin pantallas de desafío ni enrolamiento.
+El próximo paso es solo revisar 7C.1. No implementes otra etapa.
 ```

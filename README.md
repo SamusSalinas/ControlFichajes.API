@@ -307,7 +307,7 @@ Lo que queda para después, sin implementarlo aquí: con MFA obligatorio se pued
 
 ### Desafío de login y TOTP
 
-Solo una cuenta con `TotpHabilitado` pasa por el segundo factor. El enrolamiento, la desactivación, el reemplazo y la administración de MFA no están expuestos. El frontend todavía no presenta el desafío. Las cuentas sin MFA, incluido el SuperAdmin compartido, conservan el login anterior y no se les activa MFA ni `MfaObligatorio`.
+Solo una cuenta con `TotpHabilitado` pasa por el segundo factor. El enrolamiento voluntario está implementado y apagado con `Auth:PermitirEnrolamientoMfa`. La desactivación, el reemplazo y la administración de MFA no están expuestos. El frontend todavía no presenta el desafío ni el enrolamiento. Las cuentas sin MFA, incluido el SuperAdmin compartido, conservan el login anterior y no se les activa MFA ni `MfaObligatorio`.
 
 La validación usa Otp.NET 1.4.1, compatible con `net10.0` y sin dependencias propias. `ValidadorTotp` fija HMAC-SHA1, seis dígitos y pasos de 30 segundos. La tolerancia inicial es el paso actual y uno anterior, sin paso futuro: `VerificationWindow(previous: 1, future: 0)`. No se usa el valor de la biblioteca, que acepta solo el paso actual, ni `RfcSpecifiedNetworkDelay`, que también acepta un paso futuro. Un paso atrás cubre un autenticador o una red que llegan tarde. Un paso adelante aceptaría un código que todavía no es válido y ensancha la ventana hacia el futuro.
 

@@ -1,6 +1,6 @@
 # Estado actual
 
-La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 7B, desafío y TOTP, es `8e9d684235fb24aa485df8e1107241f858f58ea1`. La etapa 7C.1, enrolamiento voluntario y códigos de recuperación, queda en el commit que actualiza esa continuidad, al 4 de noviembre de 2026. El enrolamiento nace deshabilitado. El frontend de 6B sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`, no se modificó y todavía no presenta el desafío ni el enrolamiento. Ese documento no reemplaza el cierre de turnos de abajo.
+La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 7C.1, enrolamiento voluntario, es `da38172767fd8a9d5da69d4116e26389c355e1f4` y queda pendiente de revisión final. `Auth:PermitirEnrolamientoMfa` está en falso. El frontend sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`, sin pantallas de desafío ni de enrolamiento. El SuperAdmin compartido no tiene MFA ni obligación. Ese documento no reemplaza el cierre de turnos de abajo.
 
 Cierre de la noche del 2 de noviembre de 2026. No se desplegó ni se mergeó a `main`.
 
