@@ -58,6 +58,10 @@ namespace ControlFichajes.API.Data
                 .HasForeignKey(r => r.UsuarioId)
                 .OnDelete(DeleteBehavior.Cascade);
             modelBuilder.Entity<CodigoRecuperacionMfa>()
+                .HasIndex(c => c.CodigoHash)
+                .IsUnique()
+                .HasDatabaseName("UX_CodigoRecuperacionMfa_CodigoHash");
+            modelBuilder.Entity<CodigoRecuperacionMfa>()
                 .HasOne(c => c.Usuario)
                 .WithMany()
                 .HasForeignKey(c => c.UsuarioId)

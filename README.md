@@ -291,6 +291,20 @@ propio por IP: 30 por 60 segundos (`Auth:RefreshLimite`,
 igual que el login, van con `Cache-Control: no-store`. Los logs y la auditoría
 no guardan la cookie, el token, el encabezado `Authorization` ni el cuerpo.
 
+### Persistencia de MFA
+
+Esta etapa no cambia `POST /api/Auth/Login`, no abre el enrolamiento y no exige MFA. `Auth:ExigirMfa` y `Auth:MfaGraciaDias` siguen sin efecto. `MfaObligatorio` nace en falso. Las cuentas existentes, incluido el SuperAdmin, conservan contraseña, rol, empresa, estado, `TokenVersion` y acceso.
+
+El secreto activo sigue en `Usuario.TotpSecretoCifrado`. El pendiente va en `TotpPendienteCifrado` y vence en `TotpPendienteExpiraEn`. Esos valores, cuando una etapa posterior los escriba, son un sobre AES-GCM: versión, identificador de clave, nonce, ciphertext y etiqueta. El cifrado autentica también el id del usuario y el propósito (`totp-activo` o `totp-pendiente`), así que un sobre no se puede mover de cuenta ni de uso. `IProtectorSecretosMfa` usa la clave activa para cifrar y cualquier clave de `Auth:TotpClaves:Lectura` para abrir. No lee `Jwt:Key` ni `Auth:TotpProtectionKey`. Si la clave activa falta, no está entre las de lectura, o el material no es Base64 de 32 bytes, proteger y abrir fallan con `proteccion_secreto_no_disponible`. El arranque no genera una clave y el login de quien no tiene MFA sigue igual.
+
+La misma `Activa` y el mismo conjunto de lectura tienen que estar en cada instancia. Se provisionan fuera del repositorio, se respaldan junto con `Jwt:Key` antes del primer secreto y no se copian a archivos versionados. Para rotar se publica un id nuevo como activo y se conserva el anterior en lectura hasta reescribir los sobres.
+
+`MfaIntentosFallidos` y `MfaBloqueadoHasta` quedan en el usuario. Crear otro `DesafioMfa` no los reinicia. El desafío guarda, desde que exista, `TokenVersion`, `Generacion`, `ModoSesion`, propósito, vencimiento e `Intentos`. `CodigoRecuperacionMfa.CodigoHash` tiene índice único. La migración lo crea solo si no hay hashes duplicados; si los hay, no borra filas.
+
+Una base que ya aplicó `20261104_sesion_generacion.sql` continúa con `database/20261105_mfa_persistencia.sql`. El esquema limpio ya incluye esas columnas. El rollback de esta etapa no se usa en la instalación y no toca los campos TOTP anteriores.
+
+Lo que queda para después, sin implementarlo aquí: con MFA obligatorio se puede reemplazar el autenticador mediante verificación segura y no se puede desactivar. El desafío queda atado a la generación y al modo de sesión desde su creación. Los límites de usuario persisten entre desafíos. La ventana TOTP tiene que ser configuración explícita, justificada, y no el valor implícito de una biblioteca. Cada código de recuperación tendrá 128 bits de entropía, se mostrará una sola vez y solo se guardará su hash. El token restringido de vinculación tendrá propósito y vencimiento propios, separados del JWT tradicional.
+
 ### Alta inicial de SuperAdmin
 
 Esta cuenta no se crea por un endpoint público. La inserta un administrador de
@@ -1428,5 +1442,6 @@ Cors__AllowedOrigins__0=http://localhost:5173
 - No subir `.env.production` al repositorio.
 - No subir `appsettings.Development.local.json` si contiene credenciales.
 - Utilizar una clave JWT larga y aleatoria en producción.
+- No cifrar el secreto TOTP con `Jwt:Key`. Provisionar `Auth:TotpClaves` aparte y respaldarla. No generarla al arrancar ni versionarla.
 - Limitar los orígenes CORS a los frontends autorizados.
 - Utilizar HTTPS cuando el sistema pase de la etapa de pruebas a un entorno definitivo.

@@ -33,7 +33,8 @@ Todas quedaron en commits locales. El usuario las declaró aprobadas y respaldad
 | 5B. Recuperación | `0aa14677401352349bcc06deed76c8fd3e72950e` | `feat: recupera la contraseña por correo sin iniciar sesión` |
 | 6A. Refresh rotativo | `e5df9ba2e5f55326faf07e52046c2ea933442377` | `feat: rota la sesión web y la revoca al cierre` |
 | 6A.1. Cookie por generación | `79d395dc8e16052db5b8fd8e6a9214c643df9046` | `feat: aísla la cookie de cada generación de sesión` |
-| 6C. Access corto | este commit | ver el mensaje del commit |
+| 6C. Access corto | `234c75f7b2f10d95600e2270056e7c334867b6fe` | `feat: acorta el access de la sesión web renovable` |
+| 7A. Persistencia MFA | este commit | ver el mensaje del commit |
 
 La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b622662c36a4ebaffc9253eadd1834dfe`, ya no es el HEAD de la etapa: el hash vigente es `35653c7`. El padre sigue siendo `91ad7ba`.
 
@@ -47,7 +48,7 @@ La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b62266
 
 `POST /api/Auth/bootstrap` responde `404` cuando `Auth:PermitirBootstrap` no está en `true`. En el `appsettings.json` versionado está en `false`.
 
-No se modificó el frontend en esta etapa. El frontend de la etapa 6B ya está integrado en su repositorio, commit `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. No se implementó MFA. La etapa 6C acorta solo el access de la sesión renovable.
+No se modificó el frontend. Sigue en `feat/autenticacion-sesiones-web`, commit `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. La etapa 7A persiste y cifra el material de MFA, pero no cambia el login, no abre el enrolamiento y no exige MFA a ninguna cuenta.
 
 ## Endpoints de esta rama
 
@@ -230,9 +231,36 @@ Para la expiración real, `appsettings.Development.local.json` tuvo `Jwt:AccessE
 
 Al terminar se quitó el valor temporal. Un login renovable nuevo volvió a medir 15 minutos y la API quedó escuchando en `http://127.0.0.1:5088`.
 
+## Etapa 7A
+
+Persiste y cifra el material de MFA. El padre es `234c75f7b2f10d95600e2270056e7c334867b6fe`. No se modificó el login, el frontend ni el agente. No se agregó una biblioteca TOTP. No se expone enrolamiento y ninguna cuenta queda con MFA obligatorio o configurado.
+
+`Usuario` suma `MfaObligatorio` (predeterminado falso), `TotpPendienteCifrado`, `TotpPendienteExpiraEn`, `MfaIntentosFallidos` y `MfaBloqueadoHasta`. Los dos últimos viven en el usuario: crear un `DesafioMfa` no los reinicia. El desafío suma `TokenVersion`, `Generacion`, `ModoSesion` e `Intentos`, junto al propósito y al vencimiento que ya tenía. `CodigoRecuperacionMfa.CodigoHash` queda con el índice único `UX_CodigoRecuperacionMfa_CodigoHash`.
+
+`IProtectorSecretosMfa` cifra con AES-GCM del runtime. El sobre es `v1.{id}.{nonce}.{ciphertext}.{etiqueta}`. La autenticación adicional es el id del usuario y el propósito (`totp-activo` o `totp-pendiente`). Cifra con `Auth:TotpClaves:Activa` y abre con cualquiera de `Auth:TotpClaves:Lectura`. No lee `Jwt:Key` ni el nombre anterior `Auth:TotpProtectionKey`. Si la clave falta, no está identificada o no es Base64 de 32 bytes, la operación falla con `proteccion_secreto_no_disponible` y el proceso igual arranca. Un sobre alterado, de otro usuario, de otro propósito o de una clave que ya no está en lectura falla con `proteccion_secreto_rechazada`. Las pruebas generan las claves en memoria y no las imprimen. Los archivos versionados dejan la clave vacía.
+
+Para provisionar: generar una sola vez, fuera de la API, 32 bytes y un identificador; poner el mismo identificador en `Activa` y en `Lectura`; repetir ese par en cada instancia; respaldarlo junto con `Jwt:Key` antes del primer secreto. Para rotar, publicar otro identificador como activo y conservar el anterior en lectura hasta reescribir los sobres. No se generó ni se mostró una clave real en esta etapa.
+
+La migración incremental es `database/20261105_mfa_persistencia.sql`. No tiene `UPDATE` ni `DELETE`. Si hay hashes duplicados, aborta llamando a un procedimiento inexistente y no borra filas. El esquema limpio ya incluye las columnas. El rollback de esta etapa no toca los campos TOTP anteriores y no se ejecuta en la instalación.
+
+En la copia local `cf_auth_mfa7a`, tomada de `cf_auth_stage` en `127.0.0.1:3308`, no había secretos, desafíos ni códigos. La migración conservó 21 usuarios, 2 empresas, 66 refresh, 30 invitaciones, 10 recuperaciones y 324 auditorías, además de los hashes, roles, empresas, estados y `TokenVersion`. Una segunda ejecución no los cambió. El esquema limpio `cf_auth_mfa7a_limpia` creó las columnas y el índice, sin usuarios. Una base con dos hashes iguales abortó, dejó las dos filas y no creó el índice. No se transformó ningún valor TOTP previo porque no había. Después de esa prueba se aplicó el mismo script a la base local del laboratorio y se eliminaron las tres bases temporales.
+
+El SuperAdmin quedó activo, con `TokenVersion` 1, sin secreto y con `MfaObligatorio` en falso. No se repitió su login HTTP: el archivo temporal de su contraseña ya no existe, y un resto de tres dígitos fue rechazado por el mínimo de ocho caracteres antes de consultar la cuenta. La cuenta existente `existente@local.test` inició sesión con el contrato anterior: `200`, `token`, `mensaje` y `requiereCambioPassword` en falso, 1440 minutos, sin `sid` y con `token_use=web`. La consulta de login ya lee las columnas nuevas y no devolvió un desafío.
+
+`dotnet build` terminó con la advertencia conocida `NU1902`. La suite con la exclusión ya documentada dejó 434 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas.
+
+Decisiones que esta etapa registra y no implementa:
+
+- Con MFA obligatorio se puede reemplazar el autenticador mediante una verificación segura, y no se puede desactivar.
+- El desafío queda vinculado a la generación y al modo de sesión desde su creación.
+- Los límites del usuario persisten entre desafíos.
+- La ventana TOTP tiene que ser configuración explícita y justificada, no el valor implícito de una biblioteca.
+- Cada código de recuperación tendrá 128 bits de entropía, se entregará una sola vez y solo se guardará su hash.
+- El token restringido de vinculación tendrá propósito y vencimiento propios, separados del JWT tradicional.
+
 ## Próximo paso
 
-La etapa 6C queda para revisión. No generar un bundle y no avanzar a MFA.
+La etapa 7A queda para revisión. No generar un bundle y no implementar el desafío, el enrolamiento ni el restablecimiento administrativo.
 
 ## Texto para una conversación nueva
 
@@ -240,6 +268,6 @@ La etapa 6C queda para revisión. No generar un bundle y no avanzar a MFA.
 Leé api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md.
 Después comprobá el estado real: rama, git status, git rev-parse HEAD y git rev-parse '@{upstream}'.
 No continúes si la rama no es `feat/autenticacion-segura` o si el árbol no está limpio. No hay upstream.
-La etapa 6C acorta el access renovable a Jwt:AccessExpireMinutes. El frontend de 6B está en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26.
-No generes un bundle y no avances a MFA.
+La etapa 7A persiste y cifra MFA sin cambiar el login ni exigirlo. El frontend de 6B está en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26.
+No generes un bundle y no implementes el desafío ni el enrolamiento.
 ```

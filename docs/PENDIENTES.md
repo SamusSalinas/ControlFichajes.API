@@ -2,8 +2,8 @@
 
 Autenticación, 4 de noviembre de 2026. El detalle está en `docs/CONTINUIDAD_AUTENTICACION.md`.
 
-- La etapa 6C acorta el access renovable a `Jwt:AccessExpireMinutes` (15) y queda para revisión. El frontend de 6B ya está integrado en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. No se avanzó a MFA ni se generó un bundle.
-- MFA no está implementado.
+- La etapa 7A persiste el secreto MFA cifrado y queda para revisión. No cambia el login, no abre el enrolamiento y no exige MFA. El frontend sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`. No se generó un bundle.
+- Siguen pendientes el desafío de login, el enrolamiento, los códigos de recuperación y el restablecimiento administrativo de MFA.
 - Los bundles locales de 5A y 5B fueron verificados según las salidas de PowerShell aportadas por el usuario. Las rutas y los hashes están en `docs/CONTINUIDAD_AUTENTICACION.md`. La subida de ambos a Drive sigue pendiente de confirmación.
 
 Hechos abiertos al cierre de la noche del 2 de noviembre de 2026.

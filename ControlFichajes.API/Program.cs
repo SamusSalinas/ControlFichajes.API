@@ -112,6 +112,7 @@ builder.Services.AddScoped<IInvitacionUsuarioService, InvitacionUsuarioService>(
 builder.Services.AddScoped<IRecuperacionPasswordService, RecuperacionPasswordService>();
 builder.Services.AddScoped<ISesionWebService, SesionWebService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
+builder.Services.AddSingleton<IProtectorSecretosMfa, ProtectorSecretosMfa>();
 builder.Services.AddScoped<IAgenteAuthService, AgenteAuthService>();
 builder.Services.AddScoped<IAgenteAdminService, AgenteAdminService>();
 builder.Services.AddScoped<IAgenteLectorService, AgenteLectorService>();

@@ -88,7 +88,7 @@ public class EsquemaAutenticacionTests
         var secretos = new[]
         {
             "Jwt__Key=",
-            "Auth__TotpProtectionKey=",
+            "Auth__TotpClaves__Lectura__REEMPLAZAR_ID=",
             "Smtp__Password=",
             "ConnectionStrings__DefaultConnection="
         };
@@ -131,8 +131,11 @@ public class EsquemaAutenticacionTests
         var usuario = new Usuario();
 
         Assert.False(usuario.TotpHabilitado);
+        Assert.False(usuario.MfaObligatorio);
+        Assert.Equal(0, usuario.MfaIntentosFallidos);
         Assert.Null(usuario.CorreoVerificadoEn);
         Assert.Null(usuario.TotpSecretoCifrado);
+        Assert.Null(usuario.TotpPendienteCifrado);
         Assert.Null(usuario.MfaOmitidoHasta);
         Assert.Null(usuario.UltimoPasoTotp);
         Assert.Null(usuario.InvitadoEn);

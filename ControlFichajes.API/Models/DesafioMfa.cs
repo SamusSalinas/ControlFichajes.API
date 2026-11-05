@@ -19,4 +19,13 @@ public class DesafioMfa
 
     [MaxLength(20)]
     public string Proposito { get; set; } = string.Empty;
+
+    public int TokenVersion { get; set; }
+
+    public Guid? Generacion { get; set; }
+
+    [MaxLength(20)]
+    public string? ModoSesion { get; set; }
+
+    public int Intentos { get; set; }
 }

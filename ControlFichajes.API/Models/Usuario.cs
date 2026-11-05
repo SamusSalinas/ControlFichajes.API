@@ -61,5 +61,16 @@ namespace ControlFichajes.API.Models
         public DateTime? MfaOmitidoHasta { get; set; }
 
         public long? UltimoPasoTotp { get; set; }
+
+        public bool MfaObligatorio { get; set; }
+
+        [MaxLength(512)]
+        public string? TotpPendienteCifrado { get; set; }
+
+        public DateTime? TotpPendienteExpiraEn { get; set; }
+
+        public int MfaIntentosFallidos { get; set; }
+
+        public DateTime? MfaBloqueadoHasta { get; set; }
     }
 }
