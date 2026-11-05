@@ -18,6 +18,7 @@ public interface IVerificacionMfaService
         string? ip,
         string? userAgent,
         string? refreshAnterior,
+        string? codigoRecuperacion = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -67,8 +68,14 @@ public sealed partial class VerificacionMfaService : IVerificacionMfaService
         string? ip,
         string? userAgent,
         string? refreshAnterior,
+        string? codigoRecuperacion = null,
         CancellationToken cancellationToken = default)
     {
+        var pideTotp = !string.IsNullOrWhiteSpace(codigo);
+        var pideRecuperacion = !string.IsNullOrWhiteSpace(codigoRecuperacion);
+        if (pideTotp == pideRecuperacion)
+            return new ResultadoVerificacionMfa { Estado = pideTotp ? EstadoVerificacionMfa.Ambiguo : EstadoVerificacionMfa.Invalido };
+
         if (!_limite.Permitir(
                 "verificacion",
                 ip,
@@ -128,7 +135,13 @@ public sealed partial class VerificacionMfaService : IVerificacionMfaService
                 return new ResultadoVerificacionMfa { Estado = EstadoVerificacionMfa.Bloqueado };
             }
 
-            if (!usuario.TotpHabilitado || string.IsNullOrWhiteSpace(usuario.TotpSecretoCifrado))
+            if (!usuario.TotpHabilitado)
+                return await NoDisponibleAsync(usuario, "clave");
+
+            if (pideRecuperacion)
+                return await ConsumirRecuperacionAsync(alcance, fila, usuario, codigoRecuperacion, ahora, ip, userAgent, refreshAnterior, cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(usuario.TotpSecretoCifrado))
                 return await NoDisponibleAsync(usuario, "clave");
 
             byte[] secreto;
@@ -244,6 +257,114 @@ public sealed partial class VerificacionMfaService : IVerificacionMfaService
         {
             _serie.Release();
         }
+    }
+
+    private async Task<ResultadoVerificacionMfa> ConsumirRecuperacionAsync(
+        AlcanceUsuario alcance,
+        DesafioMfa fila,
+        Usuario usuario,
+        string? codigoRecuperacion,
+        DateTime ahora,
+        string? ip,
+        string? userAgent,
+        string? refreshAnterior,
+        CancellationToken cancellationToken)
+    {
+        if (usuario.MfaBloqueadoHasta.HasValue && usuario.MfaBloqueadoHasta <= ahora)
+        {
+            usuario.MfaIntentosFallidos = 0;
+            usuario.MfaBloqueadoHasta = null;
+        }
+
+        var normalizado = CodigosRecuperacionMfa.Normalizar(codigoRecuperacion);
+        CodigoRecuperacionMfa? codigo = null;
+        if (normalizado != null)
+        {
+            var hash = CodigosRecuperacionMfa.Hash(normalizado);
+            codigo = await _context.CodigoRecuperacionMfa.SingleOrDefaultAsync(c => c.CodigoHash == hash, cancellationToken);
+        }
+
+        if (codigo == null || codigo.UsuarioId != usuario.Id || codigo.UsadoEn != null)
+            return await FallarCodigoAsync(alcance, fila, usuario, ahora, "recuperacion", cancellationToken);
+
+        codigo.UsadoEn = ahora;
+        usuario.MfaIntentosFallidos = 0;
+        usuario.MfaBloqueadoHasta = null;
+        fila.ConsumidoEn = ahora;
+        return await EmitirAsync(alcance, fila, usuario, ip, userAgent, refreshAnterior, "recuperacion", cancellationToken);
+    }
+
+    private async Task<ResultadoVerificacionMfa> EmitirAsync(
+        AlcanceUsuario alcance,
+        DesafioMfa fila,
+        Usuario usuario,
+        string? ip,
+        string? userAgent,
+        string? refreshAnterior,
+        string? detalle,
+        CancellationToken cancellationToken)
+    {
+        string? refresh = null;
+        DateTime? expiraRefresh = null;
+        string? familia = null;
+        var renovable = fila.ModoSesion == ModoSesionMfa.Renovable;
+        if (renovable)
+        {
+            var preparada = await _sesiones.AgregarFamiliaEnAlcanceAsync(
+                usuario,
+                refreshAnterior,
+                ip,
+                userAgent,
+                fila.Generacion,
+                cancellationToken);
+            if (preparada.Estado != EstadoSesionWeb.Emitida)
+            {
+                await _context.Entry(usuario).ReloadAsync(cancellationToken);
+                await _context.Entry(fila).ReloadAsync(cancellationToken);
+                foreach (var entrada in _context.ChangeTracker.Entries<CodigoRecuperacionMfa>().ToList())
+                    await entrada.ReloadAsync(cancellationToken);
+
+                return new ResultadoVerificacionMfa
+                {
+                    Estado = preparada.Estado == EstadoSesionWeb.Rechazada
+                        ? EstadoVerificacionMfa.Contexto
+                        : EstadoVerificacionMfa.Error
+                };
+            }
+
+            refresh = preparada.Refresh;
+            expiraRefresh = preparada.ExpiraEn;
+            familia = preparada.FamiliaId;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        if (AntesDeConfirmar != null)
+            await AntesDeConfirmar(cancellationToken);
+
+        await alcance.ConfirmarAsync(cancellationToken);
+        if (DespuesDeConfirmar != null)
+            await DespuesDeConfirmar(cancellationToken);
+
+        var respuesta = new AuthResponseDto
+        {
+            Token = _tokenService.CreateToken(usuario, familia),
+            Mensaje = "Autenticación exitosa",
+            RequiereCambioPassword = usuario.RequiereCambioPassword
+        };
+        await AuditarAsync("mfa_verificado", "aceptado", usuario.Id, detalle);
+        await AuditarAsync("login_ok", "aceptado", usuario.Id, null);
+        if (renovable)
+            await AuditarAsync("sesion_emitida", "aceptado", usuario.Id, null);
+
+        return new ResultadoVerificacionMfa
+        {
+            Estado = EstadoVerificacionMfa.Emitido,
+            Respuesta = respuesta,
+            Refresh = refresh,
+            ExpiraRefresh = expiraRefresh,
+            Generacion = fila.Generacion,
+            Renovable = renovable
+        };
     }
 
     private async Task<ResultadoVerificacionMfa> FallarCodigoAsync(

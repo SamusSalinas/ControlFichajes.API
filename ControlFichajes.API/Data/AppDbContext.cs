@@ -25,6 +25,7 @@ namespace ControlFichajes.API.Data
         public DbSet<RecuperacionPassword> RecuperacionPassword { get; set; } = null!;
         public DbSet<RefreshToken> RefreshToken { get; set; } = null!;
         public DbSet<CodigoRecuperacionMfa> CodigoRecuperacionMfa { get; set; } = null!;
+        public DbSet<OperacionEnrolamientoMfa> OperacionEnrolamientoMfa { get; set; } = null!;
         public DbSet<DesafioMfa> DesafioMfa { get; set; } = null!;
         public DbSet<AuditoriaSeguridad> AuditoriaSeguridad { get; set; } = null!;
 
@@ -65,6 +66,12 @@ namespace ControlFichajes.API.Data
                 .HasOne(c => c.Usuario)
                 .WithMany()
                 .HasForeignKey(c => c.UsuarioId)
+                .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<OperacionEnrolamientoMfa>().HasIndex(o => o.TokenHash).IsUnique();
+            modelBuilder.Entity<OperacionEnrolamientoMfa>()
+                .HasOne(o => o.Usuario)
+                .WithMany()
+                .HasForeignKey(o => o.UsuarioId)
                 .OnDelete(DeleteBehavior.Cascade);
             modelBuilder.Entity<DesafioMfa>().HasIndex(d => d.TokenHash).IsUnique();
             modelBuilder.Entity<DesafioMfa>()

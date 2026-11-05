@@ -44,7 +44,12 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "sesion_revocada",
         "mfa_desafio_emitido",
         "mfa_verificado",
-        "mfa_rechazado"
+        "mfa_rechazado",
+        "mfa_enrolamiento_iniciado",
+        "mfa_enrolamiento_confirmado",
+        "mfa_enrolamiento_rechazado",
+        "mfa_codigos_regenerados",
+        "mfa_codigos_rechazados"
     };
 
     private static readonly HashSet<string> Resultados = new(StringComparer.Ordinal)
@@ -77,7 +82,11 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "cifrado",
         "clave",
         "paso",
-        "contexto"
+        "contexto",
+        "ya_configurado",
+        "operacion",
+        "credencial",
+        "recuperacion"
     };
 
     private readonly IDbContextFactory<AppDbContext> _contextFactory;

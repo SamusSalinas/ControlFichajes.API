@@ -26,6 +26,7 @@ namespace ControlFichajes.API.Controllers
         private readonly ISesionWebService? _sesiones;
         private readonly IHostEnvironment? _entorno;
         private readonly IVerificacionMfaService? _mfa;
+        private readonly IEnrolamientoMfaService? _enrolamiento;
 
         public const string PoliticaLimiteAceptacion = "aceptar-invitacion";
         public const string PoliticaLimiteRecuperacionSolicitud = "recuperacion-solicitar";
@@ -44,7 +45,8 @@ namespace ControlFichajes.API.Controllers
             IRecuperacionPasswordService? recuperacion = null,
             ISesionWebService? sesiones = null,
             IHostEnvironment? entorno = null,
-            IVerificacionMfaService? mfa = null)
+            IVerificacionMfaService? mfa = null,
+            IEnrolamientoMfaService? enrolamiento = null)
         {
             _authService = authService;
             _agenteAuthService = agenteAuthService;
@@ -56,6 +58,7 @@ namespace ControlFichajes.API.Controllers
             _sesiones = sesiones;
             _entorno = entorno;
             _mfa = mfa;
+            _enrolamiento = enrolamiento;
         }
 
         [HttpPost("Login")]
@@ -125,6 +128,11 @@ namespace ControlFichajes.API.Controllers
             if (_mfa == null)
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "mfa_no_disponible" });
 
+            var tieneCodigo = !string.IsNullOrWhiteSpace(request?.Codigo);
+            var tieneRecuperacion = !string.IsNullOrWhiteSpace(request?.CodigoRecuperacion);
+            if (tieneCodigo == tieneRecuperacion)
+                return BadRequest(new { codigo = tieneCodigo ? "mfa_codigo_ambiguo" : "mfa_codigo_requerido" });
+
             var modo = clase == ClaseSolicitudSesion.Renovable
                 ? ModoSesionMfa.Renovable
                 : ModoSesionMfa.Tradicional;
@@ -136,8 +144,73 @@ namespace ControlFichajes.API.Controllers
                 IdGeneracion(generacion),
                 Ip(),
                 AgenteUsuario(),
-                Request.Cookies[nombre]);
+                Request.Cookies[nombre],
+                request?.CodigoRecuperacion);
             return ResponderMfa(resultado, generacion);
+        }
+
+        [HttpPost("mfa/enrolamiento/iniciar")]
+        [Authorize]
+        public async Task<IActionResult> IniciarEnrolamiento([FromBody] IniciarEnrolamientoMfaDto? request)
+        {
+            SinCache();
+            if (!AuthPolicy.PermitirEnrolamientoMfa(_configuration))
+                return NotFound();
+
+            if (ProteccionSolicitudSesion.Evaluar(Request, _configuration) == ClaseSolicitudSesion.Rechazada)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            if (_enrolamiento == null || !TryUsuarioActual(out var usuarioId))
+                return Unauthorized(new { mensaje = "Sesión inválida." });
+
+            var resultado = await _enrolamiento.IniciarAsync(usuarioId, request?.Password, SesionActual(), Ip());
+            return ResponderEnrolamiento(resultado, inicio: true);
+        }
+
+        [HttpPost("mfa/enrolamiento/confirmar")]
+        [Authorize]
+        public async Task<IActionResult> ConfirmarEnrolamiento([FromBody] ConfirmarEnrolamientoMfaDto? request)
+        {
+            SinCache();
+            if (!AuthPolicy.PermitirEnrolamientoMfa(_configuration))
+                return NotFound();
+
+            if (ProteccionSolicitudSesion.Evaluar(Request, _configuration) == ClaseSolicitudSesion.Rechazada)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            if (_enrolamiento == null || !TryUsuarioActual(out var usuarioId))
+                return Unauthorized(new { mensaje = "Sesión inválida." });
+
+            var resultado = await _enrolamiento.ConfirmarAsync(usuarioId, request?.Operacion, request?.Codigo, SesionActual(), Ip());
+            return ResponderEnrolamiento(resultado, inicio: false);
+        }
+
+        [HttpPost("mfa/recuperacion/regenerar")]
+        [Authorize]
+        public async Task<IActionResult> RegenerarCodigos([FromBody] RegenerarCodigosMfaDto? request)
+        {
+            SinCache();
+            if (!AuthPolicy.PermitirEnrolamientoMfa(_configuration))
+                return NotFound();
+
+            if (ProteccionSolicitudSesion.Evaluar(Request, _configuration) == ClaseSolicitudSesion.Rechazada)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            var tieneCodigo = !string.IsNullOrWhiteSpace(request?.Codigo);
+            var tieneRecuperacion = !string.IsNullOrWhiteSpace(request?.CodigoRecuperacion);
+            if (tieneCodigo == tieneRecuperacion)
+                return BadRequest(new { codigo = tieneCodigo ? "mfa_codigo_ambiguo" : "mfa_codigo_requerido" });
+
+            if (_enrolamiento == null || !TryUsuarioActual(out var usuarioId))
+                return Unauthorized(new { mensaje = "Sesión inválida." });
+
+            var resultado = await _enrolamiento.RegenerarAsync(
+                usuarioId,
+                request?.Password,
+                request?.Codigo,
+                request?.CodigoRecuperacion,
+                Ip());
+            return ResponderEnrolamiento(resultado, inicio: false);
         }
 
         [HttpPost("refresh")]
@@ -325,6 +398,8 @@ namespace ControlFichajes.API.Controllers
                     return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
                 case EstadoVerificacionMfa.Bloqueado:
                     return Unauthorized(new { codigo = "mfa_bloqueado" });
+                case EstadoVerificacionMfa.Ambiguo:
+                    return BadRequest(new { codigo = "mfa_codigo_ambiguo" });
                 case EstadoVerificacionMfa.Error:
                     return StatusCode(StatusCodes.Status500InternalServerError, new { codigo = "mfa_error" });
                 case EstadoVerificacionMfa.Emitido when resultado.Respuesta != null:
@@ -362,6 +437,56 @@ namespace ControlFichajes.API.Controllers
 
             EscribirCookie(NombreCookie(generacion), resultado.Refresh, resultado.ExpiraEn.Value);
             return Ok(resultado.Respuesta);
+        }
+
+        private IActionResult ResponderEnrolamiento(ResultadoEnrolamiento resultado, bool inicio)
+        {
+            switch (resultado.Estado)
+            {
+                case EstadoEnrolamiento.Deshabilitado:
+                    return NotFound();
+                case EstadoEnrolamiento.Limitado:
+                    return StatusCode(StatusCodes.Status429TooManyRequests, new { mensaje = "Demasiadas solicitudes. Intentá más tarde." });
+                case EstadoEnrolamiento.NoDisponible:
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "mfa_no_disponible" });
+                case EstadoEnrolamiento.Contexto:
+                    return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+                case EstadoEnrolamiento.Restringido:
+                    return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Debés cambiar tu contraseña antes de continuar." });
+                case EstadoEnrolamiento.YaConfigurado:
+                    return Conflict(new { codigo = "mfa_ya_configurado" });
+                case EstadoEnrolamiento.Bloqueado:
+                    return Unauthorized(new { codigo = "mfa_bloqueado" });
+                case EstadoEnrolamiento.Credencial:
+                    return Unauthorized(new { mensaje = "Credenciales incorrectas" });
+                case EstadoEnrolamiento.Error:
+                    return StatusCode(StatusCodes.Status500InternalServerError, new { codigo = "mfa_error" });
+                case EstadoEnrolamiento.Emitido when inicio && resultado.Operacion != null && resultado.Uri != null && resultado.ClaveManual != null:
+                    return Ok(new
+                    {
+                        operacion = resultado.Operacion,
+                        uri = resultado.Uri,
+                        claveManual = resultado.ClaveManual,
+                        expiraEn = resultado.ExpiraEn
+                    });
+                case EstadoEnrolamiento.Emitido when resultado.Codigos != null && resultado.Mensaje != null:
+                    return Ok(new { mensaje = resultado.Mensaje, codigos = resultado.Codigos });
+                default:
+                    return Unauthorized(new { codigo = "mfa_invalido" });
+            }
+        }
+
+        private bool TryUsuarioActual(out int usuarioId)
+        {
+            usuarioId = 0;
+            var claim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            return int.TryParse(claim, out usuarioId) && usuarioId > 0;
+        }
+
+        private Guid? SesionActual()
+        {
+            var sid = User.FindFirstValue("sid");
+            return Guid.TryParse(sid, out var valor) ? valor : null;
         }
 
         private static Guid? IdGeneracion(LecturaGeneracionSesion generacion)

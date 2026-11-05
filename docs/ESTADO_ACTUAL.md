@@ -1,6 +1,6 @@
 # Estado actual
 
-La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 7A, persistencia y cifrado de MFA, es `5dd60b94d221ea8ee88ba69be1e8cecb8af53bcc`. La etapa 7B, desafío de login y validación TOTP, queda en el commit que actualiza esa continuidad, al 4 de noviembre de 2026. Solo afecta cuentas que ya tienen MFA configurado. El frontend de 6B sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`, no se modificó y todavía no presenta el desafío. Ese documento no reemplaza el cierre de turnos de abajo.
+La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 7B, desafío y TOTP, es `8e9d684235fb24aa485df8e1107241f858f58ea1`. La etapa 7C.1, enrolamiento voluntario y códigos de recuperación, queda en el commit que actualiza esa continuidad, al 4 de noviembre de 2026. El enrolamiento nace deshabilitado. El frontend de 6B sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`, no se modificó y todavía no presenta el desafío ni el enrolamiento. Ese documento no reemplaza el cierre de turnos de abajo.
 
 Cierre de la noche del 2 de noviembre de 2026. No se desplegó ni se mergeó a `main`.
 

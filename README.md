@@ -321,6 +321,20 @@ Dos verificaciones del mismo desafío dejan un solo éxito. El mismo paso no se 
 
 La clave de laboratorio vive solo en `ControlFichajes.API/appsettings.Development.local.json`, bajo `Auth:TotpClaves`. Ese archivo está ignorado por Git. No reutiliza `Jwt:Key` ni el valor anterior `Auth:TotpProtectionKey`. Hay que respaldarla junto con `Jwt:Key` antes de guardar un secreto real. Las pruebas de unidad usan claves efímeras en memoria.
 
+### Enrolamiento voluntario
+
+`Auth:PermitirEnrolamientoMfa` está en falso. Mientras siga así, iniciar, confirmar y regenerar responden 404. El frontend todavía no los presenta. No se exige MFA a las cuentas existentes.
+
+`POST /api/Auth/mfa/enrolamiento/iniciar` es autenticado. Sirve para una cuenta activa, sin MFA y sin cambio de contraseña pendiente, y pide la contraseña actual. Guarda un secreto nuevo cifrado con `totp-pendiente` y una operación ligada al usuario, a `TokenVersion` y a la sesión que la pidió. Vence a los `Auth:MfaEnrolamientoMinutos` (10). Responde la operación, la URI `otpauth` y la clave manual, con `Cache-Control: no-store`. No llama a un servicio externo para dibujar el código. Otro inicio invalida la operación anterior. Si MFA ya está configurado, responde `409` con `mfa_ya_configurado`.
+
+`POST /api/Auth/mfa/enrolamiento/confirmar` exige esa sesión y esa operación. Abre el secreto pendiente y lo vuelve a cifrar con `totp-activo`; no copia el sobre de un propósito al otro. Activa MFA, recuerda el paso, borra el pendiente, emite diez códigos, incrementa `TokenVersion`, invalida los desafíos abiertos y revoca las familias. La respuesta, una sola vez, trae los códigos y pide volver a iniciar sesión. Los intentos fallidos siguen en `MfaIntentosFallidos`: empezar de nuevo no los pone en cero.
+
+Cada código tiene 128 bits. Se muestra en Base32 separado por guiones. La normalización quita espacios y guiones y pasa a mayúsculas. En base se guarda el SHA-256, el conjunto, la creación y el uso. `POST /api/Auth/mfa/verificar` acepta un TOTP o un código de recuperación, nunca los dos juntos. El código se consume junto con el desafío y la sesión. No apaga MFA ni su obligación, y cuenta para el mismo límite de intentos.
+
+`POST /api/Auth/mfa/recuperacion/regenerar` pide la contraseña y un segundo factor vigente. Marca como usado el conjunto anterior, emite otro, sube `TokenVersion` y revoca las sesiones. El autenticador queda igual. Si la respuesta de confirmación o de regeneración se pierde, esos códigos en claro no se pueden volver a pedir: hay que entrar con el autenticador y regenerar. Esta etapa no reemplaza un autenticador ya configurado.
+
+Una base que ya aplicó `20261105_mfa_persistencia.sql` continúa con `database/20261106_mfa_enrolamiento.sql`. Si ya hay códigos, ese script aborta y no les inventa un conjunto. El esquema limpio ya trae la tabla y las columnas.
+
 ### Alta inicial de SuperAdmin
 
 Esta cuenta no se crea por un endpoint público. La inserta un administrador de

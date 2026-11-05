@@ -35,7 +35,8 @@ Todas quedaron en commits locales. El usuario las declaró aprobadas y respaldad
 | 6A.1. Cookie por generación | `79d395dc8e16052db5b8fd8e6a9214c643df9046` | `feat: aísla la cookie de cada generación de sesión` |
 | 6C. Access corto | `234c75f7b2f10d95600e2270056e7c334867b6fe` | `feat: acorta el access de la sesión web renovable` |
 | 7A. Persistencia MFA | `5dd60b94d221ea8ee88ba69be1e8cecb8af53bcc` | `feat: persiste el secreto MFA cifrado sin exigirlo` |
-| 7B. Desafío y TOTP | este commit | ver el mensaje del commit |
+| 7B. Desafío y TOTP | `8e9d684235fb24aa485df8e1107241f858f58ea1` | `feat: exige TOTP cuando la cuenta ya tiene MFA` |
+| 7C.1. Enrolamiento voluntario | este commit | ver el mensaje del commit |
 
 La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b622662c36a4ebaffc9253eadd1834dfe`, ya no es el HEAD de la etapa: el hash vigente es `35653c7`. El padre sigue siendo `91ad7ba`.
 
@@ -277,9 +278,27 @@ Dos verificaciones del mismo desafío dejan un solo éxito. El mismo paso no se 
 
 La clave de laboratorio está solo en `ControlFichajes.API/appsettings.Development.local.json`, en `Auth:TotpClaves`, identificador `lab7b`. El archivo sigue ignorado. No se reutilizó `Jwt:Key` ni se copió `Auth:TotpProtectionKey`. Hay que respaldarla con `Jwt:Key` antes de guardar un secreto real. Las pruebas no la imprimen. Una cuenta ficticia se creó y se borró en la base local; el SuperAdmin siguió sin secreto, sin MFA y sin obligación.
 
+## Etapa 7C.1
+
+Enrolamiento voluntario y códigos de recuperación. El padre es `8e9d684235fb24aa485df8e1107241f858f58ea1`. No se modificó el frontend: sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26` y no presenta ni el desafío ni el enrolamiento. No se activó MFA ni `MfaObligatorio` en cuentas existentes ni en el SuperAdmin. No se implementó la casilla de exigir MFA, el token de vinculación obligatoria, la desactivación, el reemplazo ni el restablecimiento administrativo.
+
+`Auth:PermitirEnrolamientoMfa` nace en falso. Con ese valor, `POST /api/Auth/mfa/enrolamiento/iniciar`, `POST /api/Auth/mfa/enrolamiento/confirmar` y `POST /api/Auth/mfa/recuperacion/regenerar` responden 404. El laboratorio puede ponerlo en `appsettings.Development.local.json`, que sigue ignorado. Al cerrar esta etapa quedó otra vez en falso. El uso de un código ya emitido en `POST /api/Auth/mfa/verificar` no depende de esa bandera.
+
+El inicio exige una sesión web activa, sin MFA configurado y sin cambio de contraseña pendiente, y verifica la contraseña actual. Genera 20 bytes para el TOTP de 7B, los cifra con `totp-pendiente` y crea una operación atada al usuario, a `TokenVersion` y a la sesión (`sid` o ausencia explícita en el modo tradicional). Vence a los `Auth:MfaEnrolamientoMinutos` (10). La respuesta trae la operación opaca, la URI `otpauth` y la clave manual, con `Cache-Control: no-store`. No genera imágenes. Un inicio nuevo invalida la operación anterior. Una cuenta que ya tiene MFA recibe `409` y `mfa_ya_configurado`.
+
+La confirmación usa la sesión y la operación. No acepta usuario ni empresa del cuerpo. Relee la fila bloqueada, abre el pendiente y lo vuelve a cifrar con `totp-activo`. Activa `TotpHabilitado`, guarda el paso, borra el pendiente, emite diez códigos, sube `TokenVersion`, consume los desafíos abiertos y revoca todas las familias. Todo queda confirmado antes de la respuesta. Los códigos se devuelven una sola vez, con el mensaje para volver a iniciar sesión. Una confirmación repetida o concurrente no genera otro conjunto ni revela los anteriores. Los fallos usan `MfaIntentosFallidos` y `MfaBloqueadoHasta`: otro inicio no los reinicia.
+
+Cada código sale de 16 bytes de `RandomNumberGenerator` (128 bits), en Base32 agrupado. En base queda solo el SHA-256 del texto normalizado: sin espacios ni guiones, en mayúsculas, alfabeto Base32. El conjunto, la creación y `UsadoEn` identifican el grupo y el uso. `POST /api/Auth/mfa/verificar` acepta el TOTP o un código de recuperación, y responde 400 si llegan los dos o ninguno. El código tiene que ser del usuario del desafío, se consume en la misma transacción que el desafío y la sesión, no desactiva MFA y comparte los límites del segundo factor.
+
+La regeneración pide contraseña y un segundo factor vigente. Invalida el conjunto anterior marcando `UsadoEn`, emite otro, sube `TokenVersion` y revoca las sesiones en la misma transacción. El autenticador no cambia. Si se pierde la respuesta de confirmación o de regeneración, el texto de esos códigos no se puede recuperar: hay que iniciar sesión con el autenticador y llamar otra vez a la regeneración. Si también se perdió la URI del inicio y la confirmación no llegó a verse, esta etapa no puede reemplazar el autenticador.
+
+No hay dependencia nueva. La migración es `database/20261106_mfa_enrolamiento.sql`. Si ya hay códigos de recuperación, aborta sin reescribirlos. El esquema limpio ya incluye la operación y las columnas del conjunto. En el laboratorio local la tabla estaba vacía: la migración creó la operación y las dos columnas, y una segunda ejecución no las duplicó. El SuperAdmin siguió sin secreto, sin MFA y sin obligación.
+
+`dotnet build` terminó con la advertencia conocida `NU1902`. La suite con la exclusión ya documentada dejó 468 correctas, 0 con error y 1 omitida. La omitida sigue siendo la prueba productiva de fichadas biométricas.
+
 ## Próximo paso
 
-La etapa 7B queda para revisión. El frontend todavía no presenta el desafío. El enrolamiento, la desactivación, el reemplazo y el restablecimiento administrativo siguen pendientes. No generar un bundle.
+La etapa 7C.1 queda para revisión. El frontend todavía no presenta el desafío ni el enrolamiento. Siguen pendientes la casilla de exigir MFA, el token de vinculación obligatoria, la desactivación, el reemplazo y el restablecimiento administrativo. No generar un bundle.
 
 ## Texto para una conversación nueva
 
@@ -287,6 +306,6 @@ La etapa 7B queda para revisión. El frontend todavía no presenta el desafío. 
 Leé api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md.
 Después comprobá el estado real: rama, git status, git rev-parse HEAD y git rev-parse '@{upstream}'.
 No continúes si la rama no es `feat/autenticacion-segura` o si el árbol no está limpio. No hay upstream.
-La etapa 7B verifica TOTP en el login de las cuentas que ya lo tienen configurado. El frontend de 6B está en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26 y todavía no presenta el desafío.
-No generes un bundle y no implementes el enrolamiento.
+La etapa 7C.1 enrola MFA de forma voluntaria y emite códigos de recuperación, pero el enrolamiento queda apagado por configuración. El frontend de 6B está en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26.
+No generes un bundle y no implementes la obligación de MFA.
 ```

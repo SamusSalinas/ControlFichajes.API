@@ -29,6 +29,7 @@ public enum EstadoVerificacionMfa
     Contexto,
     NoDisponible,
     Limitado,
+    Ambiguo,
     Emitido,
     Error
 }

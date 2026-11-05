@@ -267,10 +267,29 @@ CREATE TABLE `CodigoRecuperacionMfa` (
   `UsuarioId` int NOT NULL,
   `CodigoHash` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `UsadoEn` datetime(6) DEFAULT NULL,
+  `ConjuntoId` char(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `CreadoEn` datetime(6) NOT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `UX_CodigoRecuperacionMfa_CodigoHash` (`CodigoHash`),
   KEY `IX_CodigoRecuperacionMfa_UsuarioId` (`UsuarioId`),
   CONSTRAINT `FK_CodigoRecuperacionMfa_Usuario_UsuarioId` FOREIGN KEY (`UsuarioId`) REFERENCES `Usuario` (`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `OperacionEnrolamientoMfa` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `UsuarioId` int NOT NULL,
+  `TokenHash` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `TokenVersion` int NOT NULL,
+  `SesionId` char(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  `CreadaEn` datetime(6) NOT NULL,
+  `ExpiraEn` datetime(6) NOT NULL,
+  `InvalidadaEn` datetime(6) DEFAULT NULL,
+  `ConsumidaEn` datetime(6) DEFAULT NULL,
+  `Intentos` int NOT NULL DEFAULT 0,
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `UX_OperacionEnrolamientoMfa_TokenHash` (`TokenHash`),
+  KEY `IX_OperacionEnrolamientoMfa_UsuarioId` (`UsuarioId`),
+  CONSTRAINT `FK_OperacionEnrolamientoMfa_Usuario_UsuarioId` FOREIGN KEY (`UsuarioId`) REFERENCES `Usuario` (`Id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `DesafioMfa` (

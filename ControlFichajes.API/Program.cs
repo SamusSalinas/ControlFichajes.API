@@ -114,6 +114,7 @@ builder.Services.AddScoped<SesionWebService>();
 builder.Services.AddScoped<ISesionWebService>(sp => sp.GetRequiredService<SesionWebService>());
 builder.Services.AddSingleton<ILimiteMfaPorIp, LimiteMfaPorIp>();
 builder.Services.AddScoped<IVerificacionMfaService, VerificacionMfaService>();
+builder.Services.AddScoped<IEnrolamientoMfaService, EnrolamientoMfaService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
 builder.Services.AddSingleton<IProtectorSecretosMfa, ProtectorSecretosMfa>();
 builder.Services.AddScoped<IAgenteAuthService, AgenteAuthService>();

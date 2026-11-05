@@ -14,4 +14,8 @@ public class CodigoRecuperacionMfa
     public string CodigoHash { get; set; } = string.Empty;
 
     public DateTime? UsadoEn { get; set; }
+
+    public Guid ConjuntoId { get; set; }
+
+    public DateTime CreadoEn { get; set; }
 }

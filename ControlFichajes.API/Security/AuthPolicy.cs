@@ -17,6 +17,25 @@ public static class AuthPolicy
         return bool.TryParse(raw, out var habilitado) && habilitado;
     }
 
+    public static bool PermitirEnrolamientoMfa(IConfiguration? configuration)
+    {
+        return bool.TryParse(configuration?["Auth:PermitirEnrolamientoMfa"], out var habilitado) && habilitado;
+    }
+
+    public static int MfaEnrolamientoMinutos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:MfaEnrolamientoMinutos", 10, minimo: 1);
+    }
+
+    public static string MfaEmisor(IConfiguration? configuration)
+    {
+        var texto = configuration?["Auth:MfaEmisor"]?.Trim();
+        if (string.IsNullOrWhiteSpace(texto) || texto.Length > 40 || texto.Contains(':') || texto.Contains('/') || texto.Contains('?'))
+            return "ControlFichajes";
+
+        return texto;
+    }
+
     public static bool ExigirMfa(IConfiguration? configuration)
     {
         return bool.TryParse(configuration?["Auth:ExigirMfa"], out var exigir) && exigir;
