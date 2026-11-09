@@ -117,6 +117,9 @@ public sealed partial class VerificacionMfaService : IVerificacionMfaService
                 return new ResultadoVerificacionMfa { Estado = EstadoVerificacionMfa.Contexto };
             }
 
+            if (fila.Proposito == ModoSesionMfa.PropositoVinculacion)
+                return Invalido();
+
             if (!usuario.Activo || fila.TokenVersion != usuario.TokenVersion || fila.Proposito != ModoSesionMfa.PropositoLogin)
                 return await CerrarAsync(alcance, fila, usuario, ahora, "consumido", cancellationToken);
 

@@ -84,6 +84,19 @@ namespace ControlFichajes.API.Controllers
                 ? ModoSesionMfa.Renovable
                 : ModoSesionMfa.Tradicional;
             var ingreso = await _authService.IngresarAsync(request, modo, IdGeneracion(generacion), Ip());
+            if (ingreso.Estado == EstadoIngreso.VinculacionPendiente)
+            {
+                return Unauthorized(new
+                {
+                    codigo = "vinculacion_mfa_pendiente",
+                    desafio = ingreso.Desafio,
+                    expiraEn = ingreso.ExpiraEn
+                });
+            }
+
+            if (ingreso.Estado == EstadoIngreso.VinculacionNoDisponible)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "vinculacion_no_disponible" });
+
             if (ingreso.Estado == EstadoIngreso.MfaRequerido)
             {
                 return Unauthorized(new
@@ -182,6 +195,42 @@ namespace ControlFichajes.API.Controllers
                 return Unauthorized(new { mensaje = "Sesión inválida." });
 
             var resultado = await _enrolamiento.ConfirmarAsync(usuarioId, request?.Operacion, request?.Codigo, SesionActual(), Ip());
+            return ResponderEnrolamiento(resultado, inicio: false);
+        }
+
+        [HttpPost("mfa/vinculacion/iniciar")]
+        [AllowAnonymous]
+        public async Task<IActionResult> IniciarVinculacion([FromBody] IniciarVinculacionMfaDto? request)
+        {
+            SinCache();
+            if (!TryContextoVinculacion(out var modo, out var generacion, out var rechazo))
+                return rechazo!;
+
+            if (_enrolamiento == null)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "mfa_no_disponible" });
+
+            var resultado = await _enrolamiento.IniciarVinculacionAsync(request?.Desafio, modo, generacion, Ip());
+            return ResponderEnrolamiento(resultado, inicio: true);
+        }
+
+        [HttpPost("mfa/vinculacion/confirmar")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ConfirmarVinculacion([FromBody] ConfirmarVinculacionMfaDto? request)
+        {
+            SinCache();
+            if (!TryContextoVinculacion(out var modo, out var generacion, out var rechazo))
+                return rechazo!;
+
+            if (_enrolamiento == null)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "mfa_no_disponible" });
+
+            var resultado = await _enrolamiento.ConfirmarVinculacionAsync(
+                request?.Desafio,
+                request?.Operacion,
+                request?.Codigo,
+                modo,
+                generacion,
+                Ip());
             return ResponderEnrolamiento(resultado, inicio: false);
         }
 
@@ -474,6 +523,34 @@ namespace ControlFichajes.API.Controllers
                 default:
                     return Unauthorized(new { codigo = "mfa_invalido" });
             }
+        }
+
+        private bool TryContextoVinculacion(out string modo, out Guid? generacion, out IActionResult? rechazo)
+        {
+            modo = ModoSesionMfa.Tradicional;
+            generacion = null;
+            rechazo = null;
+            var lectura = GeneracionSesion.Leer(Request);
+            if (lectura.Estado == EstadoGeneracionSesion.Invalida)
+            {
+                rechazo = StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+                return false;
+            }
+
+            var clase = ProteccionSolicitudSesion.Evaluar(Request, _configuration);
+            if (clase == ClaseSolicitudSesion.Rechazada || (lectura.Estado == EstadoGeneracionSesion.Valida && clase != ClaseSolicitudSesion.Renovable))
+            {
+                rechazo = StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+                return false;
+            }
+
+            if (clase == ClaseSolicitudSesion.Renovable)
+            {
+                modo = ModoSesionMfa.Renovable;
+                generacion = IdGeneracion(lectura);
+            }
+
+            return true;
         }
 
         private bool TryUsuarioActual(out int usuarioId)

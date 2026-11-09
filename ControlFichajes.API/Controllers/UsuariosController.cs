@@ -115,7 +115,13 @@ public class UsuariosController : ControllerBase
         if (!UsuarioIdentidadRules.TryValidateCorreo(correo, out var correoError))
             return BadRequest(new { mensaje = correoError });
 
-        var operacion = await _invitaciones.InvitarAsync(empresaDestino, request.NombreUsuario, correo, rol, operadorId);
+        var operacion = await _invitaciones.InvitarAsync(
+            empresaDestino,
+            request.NombreUsuario,
+            correo,
+            rol,
+            operadorId,
+            request.ExigirMfa);
         return ResponderInvitacion(operacion);
     }
 
@@ -303,6 +309,9 @@ public class UsuariosController : ControllerBase
 
         if (operacion.Estado == EstadoInvitacion.NoPendiente)
             return Conflict(new { mensaje = "No se puede reenviar la invitación." });
+
+        if (operacion.Estado == EstadoInvitacion.EnrolamientoDeshabilitado)
+            return Conflict(new { codigo = "mfa_enrolamiento_deshabilitado" });
 
         if (operacion.Estado == EstadoInvitacion.EnvioFallido || operacion.Usuario == null)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { mensaje = "No se pudo enviar la invitación." });

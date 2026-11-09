@@ -2,8 +2,7 @@
 
 Autenticación, 4 de noviembre de 2026. El detalle está en `docs/CONTINUIDAD_AUTENTICACION.md`.
 
-- La etapa 7C.1 está implementada en `da38172767fd8a9d5da69d4116e26389c355e1f4` y pendiente de revisión final en ChatGPT. `Auth:PermitirEnrolamientoMfa` queda en falso. El frontend sigue en `36dbe061c86035c60eaa79c56d1ebb02ea3e6e26`, sin pantallas de desafío ni de enrolamiento. El próximo paso es solo esa revisión.
-- Siguen pendientes exigir MFA al invitar, la vinculación restringida, la desactivación, el reemplazo y la recuperación administrativa. Esas funciones tienen que conservar los permisos actuales de rol y empresa.
+- La etapa 7D exige MFA solo en invitaciones nuevas. `Auth:PermitirEnrolamientoMfa` queda en falso. Siguen pendientes la desactivación, el reemplazo, el restablecimiento administrativo y exigir MFA a cuentas que ya existen. Esas funciones tienen que conservar los permisos actuales de rol y empresa.
 - Los bundles locales de 5A y 5B fueron verificados según las salidas de PowerShell aportadas por el usuario. Las rutas y los hashes están en `docs/CONTINUIDAD_AUTENTICACION.md`. La subida de ambos a Drive sigue pendiente de confirmación.
 
 Hechos abiertos al cierre de la noche del 2 de noviembre de 2026.

@@ -4,7 +4,7 @@ namespace ControlFichajes.API.Services;
 
 public interface IInvitacionUsuarioService
 {
-    Task<InvitacionOperacion> InvitarAsync(int empresaId, string nombreUsuario, string correo, string rol, int creadoPor);
+    Task<InvitacionOperacion> InvitarAsync(int empresaId, string nombreUsuario, string correo, string rol, int creadoPor, bool exigirMfa = false);
 
     Task<InvitacionOperacion> ReenviarAsync(int usuarioId, int creadoPor);
 
@@ -30,7 +30,8 @@ public enum EstadoInvitacion
     EmpresaInexistente,
     NoEncontrada,
     NoPendiente,
-    EnvioFallido
+    EnvioFallido,
+    EnrolamientoDeshabilitado
 }
 
 public sealed class InvitacionOperacion

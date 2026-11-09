@@ -307,7 +307,7 @@ Lo que queda para después, sin implementarlo aquí: con MFA obligatorio se pued
 
 ### Desafío de login y TOTP
 
-Solo una cuenta con `TotpHabilitado` pasa por el segundo factor. El enrolamiento voluntario está implementado y apagado con `Auth:PermitirEnrolamientoMfa`. La desactivación, el reemplazo y la administración de MFA no están expuestos. El frontend todavía no presenta el desafío ni el enrolamiento. Las cuentas sin MFA, incluido el SuperAdmin compartido, conservan el login anterior y no se les activa MFA ni `MfaObligatorio`.
+Una cuenta con `TotpHabilitado` pasa por el segundo factor. El enrolamiento voluntario está implementado y apagado con `Auth:PermitirEnrolamientoMfa`. La desactivación, el reemplazo y la administración de MFA no están expuestos. El frontend de `feat/autenticacion-sesiones-web` presenta el desafío y el enrolamiento. Las cuentas sin MFA y sin obligación, incluido el SuperAdmin compartido, conservan el login anterior.
 
 La validación usa Otp.NET 1.4.1, compatible con `net10.0` y sin dependencias propias. `ValidadorTotp` fija HMAC-SHA1, seis dígitos y pasos de 30 segundos. La tolerancia inicial es el paso actual y uno anterior, sin paso futuro: `VerificationWindow(previous: 1, future: 0)`. No se usa el valor de la biblioteca, que acepta solo el paso actual, ni `RfcSpecifiedNetworkDelay`, que también acepta un paso futuro. Un paso atrás cubre un autenticador o una red que llegan tarde. Un paso adelante aceptaría un código que todavía no es válido y ensancha la ventana hacia el futuro.
 
@@ -323,7 +323,7 @@ La clave de laboratorio vive solo en `ControlFichajes.API/appsettings.Developmen
 
 ### Enrolamiento voluntario
 
-`Auth:PermitirEnrolamientoMfa` está en falso. Mientras siga así, iniciar, confirmar y regenerar responden 404. El frontend todavía no los presenta. No se exige MFA a las cuentas existentes.
+`Auth:PermitirEnrolamientoMfa` está en falso. Mientras siga así, iniciar, confirmar y regenerar responden 404. El frontend los presenta y, con la bandera apagada, muestra que la activación no está habilitada. No se exige MFA a las cuentas que ya existían.
 
 `POST /api/Auth/mfa/enrolamiento/iniciar` es autenticado. Sirve para una cuenta activa, sin MFA y sin cambio de contraseña pendiente, y pide la contraseña actual. Guarda un secreto nuevo cifrado con `totp-pendiente` y una operación ligada al usuario, a `TokenVersion` y a la sesión que la pidió. Vence a los `Auth:MfaEnrolamientoMinutos` (10). Responde la operación, la URI `otpauth` y la clave manual, con `Cache-Control: no-store`. No llama a un servicio externo para dibujar el código. Otro inicio invalida la operación anterior. Si MFA ya está configurado, responde `409` con `mfa_ya_configurado`.
 
@@ -334,6 +334,16 @@ Cada código tiene 128 bits. Se muestra en Base32 separado por guiones. La norma
 `POST /api/Auth/mfa/recuperacion/regenerar` pide la contraseña y un segundo factor vigente. Marca como usado el conjunto anterior, emite otro, sube `TokenVersion` y revoca las sesiones. El autenticador queda igual. Si la respuesta de confirmación o de regeneración se pierde, esos códigos en claro no se pueden volver a pedir: hay que entrar con el autenticador y regenerar. Esta etapa no reemplaza un autenticador ya configurado.
 
 Una base que ya aplicó `20261105_mfa_persistencia.sql` continúa con `database/20261106_mfa_enrolamiento.sql`. Si ya hay códigos, ese script aborta y no les inventa un conjunto. El esquema limpio ya trae la tabla y las columnas.
+
+### MFA obligatorio en invitaciones nuevas
+
+`POST /api/usuarios/invitar` acepta `exigirMfa`. Si el JSON lo omite, queda en falso. No cambia el rol ni la empresa: siguen las reglas de SuperAdmin y ADMIN, y RRHH no puede invitar. Con la bandera apagada, `exigirMfa=true` responde `409` con `codigo=mfa_enrolamiento_deshabilitado` antes de crear la cuenta o enviar el correo. El alta tradicional no tiene este campo.
+
+La cuenta nace inactiva con `MfaObligatorio` en el valor pedido. Reenviar y aceptar lo conservan. Aceptar define la contraseña y activa la cuenta, sin JWT ni sesión.
+
+Una cuenta activa, obligada y todavía sin TOTP, con la contraseña correcta, recibe `401` y `codigo=vinculacion_mfa_pendiente`. El desafío tiene propósito `vinculacion`, vence a los `Auth:MfaEnrolamientoMinutos` y queda atado al usuario, a `TokenVersion`, al modo y a la generación. No hay JWT, familia ni cookie. `POST /api/Auth/mfa/verificar` no lo consume ni abre sesión. `POST /api/Auth/mfa/vinculacion/iniciar` y `confirmar` son anónimos y reutilizan el cifrado, los límites y el bloqueo del enrolamiento. Confirmar activa MFA, conserva `MfaObligatorio`, entrega los diez códigos una sola vez, sube `TokenVersion` e invalida sesiones y desafíos anteriores. Después hay que entrar con contraseña y segundo factor.
+
+Si además hay un cambio de contraseña pendiente, la vinculación sale antes que cualquier sesión. Una contraseña temporal vencida sigue rechazando el login antes de ese desafío. Si la bandera se apaga con la vinculación pendiente, el login responde `503` con `codigo=vinculacion_no_disponible` y no abre una sesión de negocio.
 
 ### Alta inicial de SuperAdmin
 

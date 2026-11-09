@@ -25,6 +25,22 @@ public interface IEnrolamientoMfaService
         string? ip,
         CancellationToken cancellationToken = default);
 
+    Task<ResultadoEnrolamiento> IniciarVinculacionAsync(
+        string? desafio,
+        string modo,
+        Guid? generacion,
+        string? ip,
+        CancellationToken cancellationToken = default);
+
+    Task<ResultadoEnrolamiento> ConfirmarVinculacionAsync(
+        string? desafio,
+        string? operacion,
+        string? codigo,
+        string modo,
+        Guid? generacion,
+        string? ip,
+        CancellationToken cancellationToken = default);
+
     Task<ResultadoEnrolamiento> RegenerarAsync(
         int usuarioId,
         string? password,

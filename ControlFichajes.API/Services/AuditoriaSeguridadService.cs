@@ -86,7 +86,8 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "ya_configurado",
         "operacion",
         "credencial",
-        "recuperacion"
+        "recuperacion",
+        "vinculacion"
     };
 
     private readonly IDbContextFactory<AppDbContext> _contextFactory;

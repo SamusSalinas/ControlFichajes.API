@@ -15,6 +15,8 @@ public class InvitarUsuarioDto
 
     [MaxLength(20)]
     public string Rol { get; set; } = "RRHH";
+
+    public bool ExigirMfa { get; set; }
 }
 
 public class InvitacionCreadaDto

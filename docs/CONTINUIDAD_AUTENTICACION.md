@@ -37,7 +37,8 @@ Todas quedaron en commits locales. El usuario las declaró aprobadas y respaldad
 | 7A. Persistencia MFA | `5dd60b94d221ea8ee88ba69be1e8cecb8af53bcc` | `feat: persiste el secreto MFA cifrado sin exigirlo` |
 | 7B. Desafío y TOTP | `8e9d684235fb24aa485df8e1107241f858f58ea1` | `feat: exige TOTP cuando la cuenta ya tiene MFA` |
 | 7C.1. Enrolamiento voluntario | `da38172767fd8a9d5da69d4116e26389c355e1f4` | `feat: enrola MFA voluntario y entrega códigos de recuperación` |
-| Cierre 7C.1, pendiente de revisión | este commit | ver el mensaje del commit |
+| Cierre 7C.1, pendiente de revisión | `b5e397946fc3f1e2d5d3cefc066959e3bc89346a` | `docs: cierra la jornada con 7C.1 pendiente de revisión` |
+| 7D. MFA obligatorio en invitaciones nuevas | este commit | ver el mensaje del commit |
 
 La etapa 4 se cerró con un amend. El commit previo de esa etapa, `018f1e2b622662c36a4ebaffc9253eadd1834dfe`, ya no es el HEAD de la etapa: el hash vigente es `35653c7`. El padre sigue siendo `91ad7ba`.
 

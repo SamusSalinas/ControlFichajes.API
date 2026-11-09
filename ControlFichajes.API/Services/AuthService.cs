@@ -102,6 +102,54 @@ namespace ControlFichajes.API.Services
                 return Invalido();
             }
 
+            if (usuario.MfaObligatorio && !usuario.TotpHabilitado)
+            {
+                if (!AuthPolicy.PermitirEnrolamientoMfa(_configuration))
+                    return new ResultadoIngreso { Estado = EstadoIngreso.VinculacionNoDisponible };
+
+                if (_protector == null)
+                    return new ResultadoIngreso { Estado = EstadoIngreso.NoDisponible };
+
+                var limiteVinculacion = _limite ?? new LimiteMfaPorIp();
+                if (!limiteVinculacion.Permitir(
+                        "emision",
+                        ip,
+                        AuthPolicy.MfaEmisionLimite(_configuration),
+                        TimeSpan.FromSeconds(AuthPolicy.MfaEmisionVentanaSegundos(_configuration))))
+                {
+                    return new ResultadoIngreso { Estado = EstadoIngreso.Limitado };
+                }
+
+                var modoVinculacion = modo == ModoSesionMfa.Renovable
+                    ? ModoSesionMfa.Renovable
+                    : ModoSesionMfa.Tradicional;
+                var ahoraVinculacion = DateTime.UtcNow;
+                var desafioVinculacion = TokenOpaco.Crear();
+                usuario.IntentosFallidos = 0;
+                usuario.BloqueadoHasta = null;
+                usuario.UltimoIntentoFallido = null;
+                var filaVinculacion = new DesafioMfa
+                {
+                    UsuarioId = usuario.Id,
+                    TokenHash = TokenOpaco.Hash(desafioVinculacion),
+                    ExpiraEn = ahoraVinculacion.AddMinutes(AuthPolicy.MfaEnrolamientoMinutos(_configuration)),
+                    Proposito = ModoSesionMfa.PropositoVinculacion,
+                    TokenVersion = usuario.TokenVersion,
+                    Generacion = modoVinculacion == ModoSesionMfa.Renovable ? generacion : null,
+                    ModoSesion = modoVinculacion,
+                    Intentos = 0
+                };
+                _context.DesafioMfa.Add(filaVinculacion);
+                await _context.SaveChangesAsync();
+                await AuditarAsync("mfa_desafio_emitido", "aceptado", usuario.Id, null, "vinculacion");
+                return new ResultadoIngreso
+                {
+                    Estado = EstadoIngreso.VinculacionPendiente,
+                    Desafio = desafioVinculacion,
+                    ExpiraEn = filaVinculacion.ExpiraEn
+                };
+            }
+
             if (!usuario.TotpHabilitado)
             {
                 usuario.IntentosFallidos = 0;

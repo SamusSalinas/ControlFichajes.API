@@ -8,7 +8,9 @@ public enum EstadoIngreso
     Autenticado,
     MfaRequerido,
     Limitado,
-    NoDisponible
+    NoDisponible,
+    VinculacionPendiente,
+    VinculacionNoDisponible
 }
 
 public sealed class ResultadoIngreso

@@ -20,6 +20,28 @@ public class ConfirmarEnrolamientoMfaDto
     public string Codigo { get; set; } = string.Empty;
 }
 
+public class IniciarVinculacionMfaDto
+{
+    [Required]
+    [MaxLength(128)]
+    public string Desafio { get; set; } = string.Empty;
+}
+
+public class ConfirmarVinculacionMfaDto
+{
+    [Required]
+    [MaxLength(128)]
+    public string Desafio { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(128)]
+    public string Operacion { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(12)]
+    public string Codigo { get; set; } = string.Empty;
+}
+
 public class RegenerarCodigosMfaDto
 {
     [Required]

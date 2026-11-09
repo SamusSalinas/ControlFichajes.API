@@ -602,6 +602,57 @@ public class InvitacionUsuarioTests
         Assert.False(body.RequiereCambioPassword);
     }
 
+    [Fact]
+    public async Task ExigirMfa_SeGuardaSoloEnLaInvitacionYSeRechazaSiElEnrolamientoEstaApagado()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.mfa");
+        var principal = Principal(admin.Id, AppRoles.Admin, 1);
+        var apagado = CrearControlador(context, principal, new Buzon());
+        var rechazado = await apagado.Invitar(new InvitarUsuarioDto
+        {
+            EmpresaId = 1,
+            NombreUsuario = "obligatorio.apagado",
+            Email = "obligatorio.apagado@empresa.test",
+            Rol = AppRoles.Rrhh,
+            ExigirMfa = true
+        });
+        var conflicto = Assert.IsType<ConflictObjectResult>(rechazado);
+        Assert.Equal("mfa_enrolamiento_deshabilitado", conflicto.Value?.GetType().GetProperty("codigo")?.GetValue(conflicto.Value));
+        Assert.False(await context.Usuario.AnyAsync(u => u.Correo == "obligatorio.apagado@empresa.test"));
+
+        var buzon = new Buzon();
+        var alta = CrearControlador(context, principal, buzon, enrolamiento: true);
+        var omitido = await alta.Invitar(Solicitud(1, "opcional.mfa", "opcional.mfa@empresa.test", AppRoles.Rrhh));
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(omitido).StatusCode);
+        Assert.False((await context.Usuario.SingleAsync(u => u.Correo == "opcional.mfa@empresa.test")).MfaObligatorio);
+
+        var creado = await alta.Invitar(new InvitarUsuarioDto
+        {
+            EmpresaId = 1,
+            NombreUsuario = "obligatorio.mfa",
+            Email = "obligatorio.mfa@empresa.test",
+            Rol = AppRoles.Rrhh,
+            ExigirMfa = true
+        });
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(creado).StatusCode);
+        var usuario = await context.Usuario.SingleAsync(u => u.Correo == "obligatorio.mfa@empresa.test");
+        Assert.True(usuario.MfaObligatorio);
+        Assert.False(usuario.Activo);
+
+        Assert.Equal(StatusCodes.Status200OK, Assert.IsType<ObjectResult>(await alta.ReenviarInvitacion(usuario.Id)).StatusCode);
+        Assert.True((await context.Usuario.SingleAsync(u => u.Id == usuario.Id)).MfaObligatorio);
+
+        var token = TokenDelEnlace(buzon.Mensajes[^1].Texto);
+        var aceptacion = await CrearAceptacion(context).AceptarInvitacion(SolicitudAceptacion(token, ClaveElegida));
+        Assert.IsType<OkObjectResult>(aceptacion);
+        Assert.False(JsonSerializer.Serialize(Assert.IsType<OkObjectResult>(aceptacion).Value).Contains("token", StringComparison.OrdinalIgnoreCase));
+        var aceptado = await context.Usuario.SingleAsync(u => u.Id == usuario.Id);
+        Assert.True(aceptado.Activo);
+        Assert.True(aceptado.MfaObligatorio);
+        Assert.False(aceptado.TotpHabilitado);
+    }
+
     private static string? Mensaje(object? valor)
     {
         return valor?.GetType().GetProperty("mensaje")?.GetValue(valor) as string;
@@ -740,7 +791,8 @@ public class InvitacionUsuarioTests
         ClaimsPrincipal user,
         ICorreoSaliente correo,
         ILogger<InvitacionUsuarioService>? logger = null,
-        int horas = 72)
+        int horas = 72,
+        bool enrolamiento = false)
     {
         var auditoria = new AuditoriaSeguridadService(
             new AuditoriaDbContextFactory(Opciones.GetValue(context, _ => throw new InvalidOperationException()).Options),
@@ -751,9 +803,9 @@ public class InvitacionUsuarioTests
             new PasswordHasher<Usuario>(),
             correo,
             auditoria,
-            Configuracion(true, horas),
+            Configuracion(true, horas, enrolamiento),
             logger ?? new RegistroDeLog().Para<InvitacionUsuarioService>());
-        return new UsuariosController(CrearAuth(context), invitaciones, Configuracion(true, horas))
+        return new UsuariosController(CrearAuth(context), invitaciones, Configuracion(true, horas, enrolamiento))
         {
             ControllerContext = new ControllerContext
             {
@@ -780,12 +832,13 @@ public class InvitacionUsuarioTests
             .Build();
     }
 
-    private static IConfiguration Configuracion(bool altaConPassword, int horas)
+    private static IConfiguration Configuracion(bool altaConPassword, int horas, bool enrolamiento = false)
     {
         return new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Auth:PermitirAltaConPassword"] = altaConPassword ? "true" : "false",
+                ["Auth:PermitirEnrolamientoMfa"] = enrolamiento ? "true" : "false",
                 ["Auth:InvitacionHoras"] = horas.ToString(),
                 ["App:PublicBaseUrl"] = "http://127.0.0.1:5173"
             })

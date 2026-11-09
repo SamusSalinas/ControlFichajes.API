@@ -40,8 +40,12 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
         string nombreUsuario,
         string correo,
         string rol,
-        int creadoPor)
+        int creadoPor,
+        bool exigirMfa = false)
     {
+        if (exigirMfa && !AuthPolicy.PermitirEnrolamientoMfa(_configuration))
+            return new InvitacionOperacion { Estado = EstadoInvitacion.EnrolamientoDeshabilitado };
+
         if (!await _context.Empresa.AnyAsync(e => e.Id == empresaId))
             return new InvitacionOperacion { Estado = EstadoInvitacion.EmpresaInexistente };
 
@@ -56,7 +60,8 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
             Rol = rol,
             Activo = false,
             InvitadoEn = DateTime.UtcNow,
-            RequiereCambioPassword = false
+            RequiereCambioPassword = false,
+            MfaObligatorio = exigirMfa
         };
         usuario.PasswordHash = _passwordHasher.HashPassword(
             usuario,
