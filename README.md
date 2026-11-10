@@ -4,6 +4,8 @@ API REST para gestionar empresas, empleados, huellas biométricas y fichadas.
 
 El backend es la fuente de verdad del contrato que consumirán posteriormente el cliente biométrico y el frontend.
 
+La documentación operativa que llegó con `origin/main` está en la [bóveda](<Documentacion API control de fichadas/Inicio.md>). Este archivo conserva el contrato detallado de la rama de autenticación.
+
 ## Requisitos
 
 - .NET 10 SDK

@@ -1,0 +1,23 @@
+name: Antigravity Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Requerido para que el agente tenga acceso al diff completo
+
+      - name: Run Antigravity Review Agent
+        uses: anguillanneuf/run-antigravity-cli@v1
+        with:
+          api-key: ${{ secrets.GEMINI_API_KEY }}
+
