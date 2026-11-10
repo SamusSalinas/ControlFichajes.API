@@ -33,6 +33,8 @@ namespace ControlFichajes.API.Models
         [Required]
         public bool Activo { get; set; } = true;
 
+        public DateTime? EliminadoEn { get; set; }
+
         public bool RequiereCambioPassword { get; set; } = false;
 
         public int IntentosFallidos { get; set; } = 0;

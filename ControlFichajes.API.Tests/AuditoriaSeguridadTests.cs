@@ -42,12 +42,12 @@ public class AuditoriaSeguridadTests
     }
 
     [Fact]
-    public async Task QuintoIntento_RegistraFalloYBloqueo()
+    public async Task TercerIntento_RegistraFalloYBloqueo()
     {
         await using var context = CrearContexto();
         var service = CrearServicio(context);
         var usuario = await AgregarUsuarioAsync(context, "admin@empresa.test");
-        usuario.IntentosFallidos = 4;
+        usuario.IntentosFallidos = 2;
         await context.SaveChangesAsync();
 
         var result = await service.LoginAsync(new LoginRequestDto
@@ -60,7 +60,53 @@ public class AuditoriaSeguridadTests
         var eventos = context.AuditoriaSeguridad.Select(a => a.Evento).OrderBy(e => e).ToArray();
         Assert.Equal(["login_bloqueado", "login_fallido"], eventos);
         Assert.NotNull(usuario.BloqueadoHasta);
+        Assert.True(usuario.BloqueadoHasta > DateTime.UtcNow.AddMinutes(14));
         AssertNoContieneSecretos(context, "ClaveMal1!", Password);
+    }
+
+    [Fact]
+    public async Task DosIntentos_NoBloqueanYLaClaveValidaReiniciaElContador()
+    {
+        await using var context = CrearContexto();
+        var service = CrearServicio(context);
+        var usuario = await AgregarUsuarioAsync(context, "rrhh@empresa.test", rol: "RRHH");
+
+        Assert.Null(await service.LoginAsync(new LoginRequestDto { Email = usuario.Correo, Password = "ClaveMal1!" }));
+        Assert.Null(await service.LoginAsync(new LoginRequestDto { Email = usuario.Correo, Password = "ClaveMal1!" }));
+        Assert.Equal(2, usuario.IntentosFallidos);
+        Assert.Null(usuario.BloqueadoHasta);
+
+        var ingreso = await service.LoginAsync(new LoginRequestDto { Email = usuario.Correo, Password = Password });
+
+        Assert.NotNull(ingreso);
+        Assert.Equal(0, usuario.IntentosFallidos);
+        Assert.Null(usuario.BloqueadoHasta);
+    }
+
+    [Fact]
+    public async Task SuperAdmin_NoSeBloqueaYUnBloqueoPrevioNoImpideLaClaveValida()
+    {
+        await using var context = CrearContexto();
+        var service = CrearServicio(context);
+        var libre = await AgregarUsuarioAsync(context, "super.libre@empresa.test", rol: "SuperAdmin");
+        for (var intento = 0; intento < 6; intento++)
+            Assert.Null(await service.LoginAsync(new LoginRequestDto { Email = libre.Correo, Password = "ClaveMal1!" }));
+
+        Assert.Equal(0, libre.IntentosFallidos);
+        Assert.Null(libre.BloqueadoHasta);
+        Assert.NotNull(await service.LoginAsync(new LoginRequestDto { Email = libre.Correo, Password = Password }));
+
+        var previo = await AgregarUsuarioAsync(context, "super.previo@empresa.test", rol: "SuperAdmin");
+        previo.IntentosFallidos = 3;
+        previo.BloqueadoHasta = DateTime.UtcNow.AddMinutes(15);
+        await context.SaveChangesAsync();
+
+        var ingreso = await service.LoginAsync(new LoginRequestDto { Email = previo.Correo, Password = Password });
+
+        Assert.NotNull(ingreso);
+        Assert.Equal(0, previo.IntentosFallidos);
+        Assert.Null(previo.BloqueadoHasta);
+        Assert.DoesNotContain(context.AuditoriaSeguridad, a => a.UsuarioId == previo.Id && a.Evento == "login_bloqueado");
     }
 
     [Fact]

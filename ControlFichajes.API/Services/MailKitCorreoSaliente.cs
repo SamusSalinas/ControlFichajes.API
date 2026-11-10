@@ -1,32 +1,31 @@
+using ControlFichajes.API.Security;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using MimeKit;
 
 namespace ControlFichajes.API.Services;
 
-public sealed class MailKitCorreoSaliente : ICorreoSaliente
+public sealed class MailKitCorreoSaliente : ICorreoSaliente, ICorreoConConexion
 {
-    private readonly IConfiguration _configuration;
+    private readonly IConfiguracionCorreoActiva _activa;
 
-    public MailKitCorreoSaliente(IConfiguration configuration)
+    public MailKitCorreoSaliente(IConfiguracionCorreoActiva activa)
     {
-        _configuration = configuration;
+        _activa = activa;
     }
 
-    public async Task EnviarAsync(CorreoSaliente mensaje, CancellationToken cancellationToken = default)
+    public Task EnviarAsync(CorreoSaliente mensaje, CancellationToken cancellationToken = default)
     {
-        var host = _configuration["Smtp:Host"]?.Trim();
-        var from = _configuration["Smtp:From"]?.Trim();
-        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(from))
+        return EnviarAsync(_activa.Efectiva(), mensaje, cancellationToken);
+    }
+
+    public async Task EnviarAsync(ConexionSmtp conexion, CorreoSaliente mensaje, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(conexion.Servidor) || string.IsNullOrWhiteSpace(conexion.Remitente))
             throw new InvalidOperationException("smtp_no_configurado");
 
-        var port = int.TryParse(_configuration["Smtp:Port"], out var puerto) ? puerto : 587;
-        var ssl = !bool.TryParse(_configuration["Smtp:EnableSsl"], out var habilitar) || habilitar;
-        var user = _configuration["Smtp:User"]?.Trim();
-        var password = _configuration["Smtp:Password"];
-
         var mail = new MimeMessage();
-        mail.From.Add(MailboxAddress.Parse(from));
+        mail.From.Add(MailboxAddress.Parse(conexion.Remitente));
         mail.To.Add(MailboxAddress.Parse(mensaje.Destinatario));
         mail.Subject = mensaje.Asunto;
         mail.Body = new BodyBuilder
@@ -36,19 +35,21 @@ public sealed class MailKitCorreoSaliente : ICorreoSaliente
         }.ToMessageBody();
 
         using var client = new SmtpClient();
-        await client.ConnectAsync(host, port, Opciones(ssl, port), cancellationToken);
-        if (!string.IsNullOrWhiteSpace(user))
-            await client.AuthenticateAsync(user, password ?? string.Empty, cancellationToken);
+        await client.ConnectAsync(conexion.Servidor, conexion.Puerto, Opciones(conexion.Cifrado), cancellationToken);
+        if (!string.IsNullOrWhiteSpace(conexion.Usuario))
+            await client.AuthenticateAsync(conexion.Usuario, conexion.Contrasena ?? string.Empty, cancellationToken);
 
         await client.SendAsync(mail, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);
     }
 
-    private static SecureSocketOptions Opciones(bool ssl, int port)
+    private static SecureSocketOptions Opciones(string cifrado)
     {
-        if (!ssl)
-            return SecureSocketOptions.None;
-
-        return port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
+        return cifrado switch
+        {
+            ConexionSmtpReglas.Ninguno => SecureSocketOptions.None,
+            ConexionSmtpReglas.StartTls => SecureSocketOptions.StartTls,
+            _ => SecureSocketOptions.SslOnConnect
+        };
     }
 }

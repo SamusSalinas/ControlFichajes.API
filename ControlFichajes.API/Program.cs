@@ -71,6 +71,24 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromSeconds(AuthPolicy.CierreVentanaSegundos(builder.Configuration)),
                 QueueLimit = 0
             }));
+    options.AddPolicy(CorreoSalienteController.PoliticaLimiteGuardado, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromSeconds(60),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(CorreoSalienteController.PoliticaLimitePrueba, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.CorreoPruebaLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.CorreoPruebaVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
 });
 builder.Services.AddHttpContextAccessor();
 
@@ -107,7 +125,17 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<ICorreoSaliente, MailKitCorreoSaliente>();
+builder.Services.AddSingleton<ProtectorContrasenaSmtp>();
+builder.Services.AddScoped<ConfiguracionCorreoServicio>(sp => new ConfiguracionCorreoServicio(
+    sp.GetRequiredService<IConfiguration>(),
+    sp.GetRequiredService<ProtectorContrasenaSmtp>(),
+    sp.GetRequiredService<ILogger<ConfiguracionCorreoServicio>>(),
+    Path.Combine(sp.GetRequiredService<IHostEnvironment>().ContentRootPath, "smtp.panel.json")));
+builder.Services.AddScoped<IConfiguracionCorreoActiva>(sp => sp.GetRequiredService<ConfiguracionCorreoServicio>());
+builder.Services.AddScoped<MailKitCorreoSaliente>();
+builder.Services.AddScoped<ICorreoSaliente>(sp => sp.GetRequiredService<MailKitCorreoSaliente>());
+builder.Services.AddScoped<ICorreoConConexion>(sp => sp.GetRequiredService<MailKitCorreoSaliente>());
+builder.Services.AddScoped<ICorreoPruebaService, CorreoPruebaService>();
 builder.Services.AddScoped<IInvitacionUsuarioService, InvitacionUsuarioService>();
 builder.Services.AddScoped<IRecuperacionPasswordService, RecuperacionPasswordService>();
 builder.Services.AddScoped<SesionWebService>();
@@ -173,6 +201,9 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("PuedeAdministrarDepartamentos", policy => policy
         .RequireClaim("token_use", "web")
         .RequireRole("SuperAdmin", "ADMIN"));
+    options.AddPolicy("SoloSuperAdmin", policy => policy
+        .RequireClaim("token_use", "web")
+        .RequireRole("SuperAdmin"));
 });
 
 var app = builder.Build();

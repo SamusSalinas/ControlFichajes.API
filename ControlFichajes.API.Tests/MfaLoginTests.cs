@@ -451,7 +451,14 @@ public class MfaLoginTests
         var valido = await ArmarAsync(otro);
         var ingreso = await Controlador(otro, Http(false), valido)
             .Login(new LoginRequestDto { Email = valido.Usuario.Correo, Password = Clave });
-        valido.Usuario.TotpSecretoCifrado = valido.Usuario.TotpSecretoCifrado!.Replace('A', 'B').Replace('B', 'C');
+        var original = valido.Usuario.TotpSecretoCifrado!;
+        var partes = original.Split('.');
+        Assert.Equal(5, partes.Length);
+        var cifrado = partes[3].ToCharArray();
+        cifrado[0] = cifrado[0] == 'A' ? 'B' : 'A';
+        partes[3] = new string(cifrado);
+        valido.Usuario.TotpSecretoCifrado = string.Join('.', partes);
+        Assert.NotEqual(original, valido.Usuario.TotpSecretoCifrado);
         await otro.SaveChangesAsync();
         var alterado = await Controlador(otro, Http(false), valido).VerificarMfa(new VerificarMfaDto
         {

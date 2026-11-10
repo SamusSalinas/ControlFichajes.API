@@ -49,8 +49,14 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
         if (!await _context.Empresa.AnyAsync(e => e.Id == empresaId))
             return new InvitacionOperacion { Estado = EstadoInvitacion.EmpresaInexistente };
 
-        if (await _context.Usuario.AnyAsync(u => u.Correo == correo))
+        var ocupante = await _context.Usuario.SingleOrDefaultAsync(u => u.Correo == correo);
+        if (ocupante != null && ocupante.EliminadoEn == null)
             return new InvitacionOperacion { Estado = EstadoInvitacion.CorreoDuplicado };
+        if (ocupante != null)
+        {
+            CorreoCuentaEliminada.Liberar(ocupante);
+            await _context.SaveChangesAsync();
+        }
 
         var usuario = new Usuario
         {
@@ -181,6 +187,7 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
     private static bool UsuarioPendiente(Usuario? usuario)
     {
         return usuario != null
+            && usuario.EliminadoEn == null
             && !usuario.Activo
             && usuario.InvitadoEn != null
             && usuario.InvitacionAceptadaEn == null;
@@ -214,7 +221,13 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
         try
         {
             var enlace = baseUrl + "/aceptar-invitacion?token=" + Uri.EscapeDataString(token);
-            await _correo.EnviarAsync(CrearMensaje(usuario, enlace));
+            var empresa = await _context.Empresa.AsNoTracking()
+                .SingleOrDefaultAsync(e => e.Id == usuario.EmpresaId);
+            await _correo.EnviarAsync(PlantillaCorreoInvitacion.Crear(
+                usuario.Correo,
+                PlantillaCorreoInvitacion.NombreEmpresa(empresa),
+                enlace,
+                guardado.ExpiraEn));
         }
         catch (Exception ex)
         {
@@ -279,7 +292,7 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
             if (transaccion != null)
                 await transaccion.CommitAsync();
 
-            return new GuardadoInvitacion(invalidoAnterior);
+            return new GuardadoInvitacion(invalidoAnterior, invitacion.ExpiraEn);
         }
         finally
         {
@@ -331,26 +344,6 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
         await AuditarAsync("invitacion_envio_fallido", "rechazado", usuario.Id, usuario.Correo, "smtp");
     }
 
-    private static CorreoSaliente CrearMensaje(Usuario usuario, string enlace)
-    {
-        var texto = string.Join(Environment.NewLine, new[]
-        {
-            "Te invitaron a Control de fichajes.",
-            "El enlace vence según la configuración de la invitación.",
-            enlace
-        });
-        var html = "<p>Te invitaron a Control de fichajes.</p><p><a href=\"" +
-            System.Net.WebUtility.HtmlEncode(enlace) +
-            "\">Aceptar invitación</a></p>";
-        return new CorreoSaliente
-        {
-            Destinatario = usuario.Correo,
-            Asunto = "Invitación a Control de fichajes",
-            Texto = texto,
-            Html = html
-        };
-    }
-
     private async Task AuditarAsync(string evento, string resultado, int? usuarioId, string? correo, string? detalle)
     {
         try
@@ -366,7 +359,7 @@ public sealed class InvitacionUsuarioService : IInvitacionUsuarioService
         }
     }
 
-    private sealed record GuardadoInvitacion(bool InvalidoAnterior);
+    private sealed record GuardadoInvitacion(bool InvalidoAnterior, DateTime ExpiraEn);
 
     /// <summary>
     /// El proveedor en memoria no ofrece bloqueo de fila. Esta puerta cubre solo ese caso

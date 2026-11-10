@@ -174,6 +174,90 @@ public class UsuariosController : ControllerBase
             : NotFound(new { mensaje = "Usuario no encontrado." });
     }
 
+    [HttpPost("{id}/exigir-mfa")]
+    public async Task<IActionResult> ExigirMfa(int id)
+    {
+        if (!UsuarioAdministracionAccess.TryGetOperadorId(User, out var operadorId))
+            return Unauthorized(new { mensaje = "Sesión inválida." });
+
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (!UsuarioAdministracionAccess.PuedeAdministrarObjetivo(User, target, operadorId))
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        var resultado = await _authService.ExigirMfaAsync(id);
+        if (resultado.StatusCode == StatusCodes.Status200OK && resultado.Usuario != null)
+        {
+            return Ok(new UsuarioActualizadoResponseDto
+            {
+                Mensaje = resultado.Mensaje,
+                Usuario = resultado.Usuario
+            });
+        }
+
+        if (resultado.StatusCode == StatusCodes.Status409Conflict)
+        {
+            return resultado.Codigo == null
+                ? Conflict(new { mensaje = resultado.Mensaje })
+                : Conflict(new { codigo = resultado.Codigo, mensaje = resultado.Mensaje });
+        }
+
+        return StatusCode(resultado.StatusCode, new { mensaje = resultado.Mensaje });
+    }
+
+    [HttpPost("{id}/eliminar")]
+    public async Task<IActionResult> Eliminar(int id)
+    {
+        if (!UsuarioAdministracionAccess.TryGetOperadorId(User, out var operadorId))
+            return Unauthorized(new { mensaje = "Sesión inválida." });
+
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (!UsuarioAdministracionAccess.PuedeAdministrarObjetivo(User, target, operadorId))
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        var resultado = await _authService.EliminarCuentaAsync(id);
+        if (resultado.StatusCode == StatusCodes.Status200OK)
+            return Ok(new { mensaje = resultado.Mensaje });
+
+        if (resultado.StatusCode == StatusCodes.Status409Conflict)
+        {
+            return resultado.Codigo == null
+                ? Conflict(new { mensaje = resultado.Mensaje })
+                : Conflict(new { codigo = resultado.Codigo, mensaje = resultado.Mensaje });
+        }
+
+        if (resultado.StatusCode == StatusCodes.Status404NotFound)
+            return NotFound(new { mensaje = resultado.Mensaje });
+
+        return StatusCode(resultado.StatusCode, new { mensaje = resultado.Mensaje });
+    }
+
+    [HttpPost("{id}/cancelar-invitacion")]
+    public async Task<IActionResult> CancelarInvitacion(int id)
+    {
+        if (!UsuarioAdministracionAccess.TryGetOperadorId(User, out var operadorId))
+            return Unauthorized(new { mensaje = "Sesión inválida." });
+
+        var target = await _authService.GetUsuarioByIdAsync(id);
+        if (!UsuarioAdministracionAccess.PuedeAdministrarObjetivo(User, target, operadorId))
+            return NotFound(new { mensaje = "Usuario no encontrado." });
+
+        var resultado = await _authService.CancelarInvitacionAsync(id);
+        if (resultado.StatusCode == StatusCodes.Status200OK)
+            return Ok(new { mensaje = resultado.Mensaje });
+
+        if (resultado.StatusCode == StatusCodes.Status409Conflict)
+        {
+            return resultado.Codigo == null
+                ? Conflict(new { mensaje = resultado.Mensaje })
+                : Conflict(new { codigo = resultado.Codigo, mensaje = resultado.Mensaje });
+        }
+
+        if (resultado.StatusCode == StatusCodes.Status404NotFound)
+            return NotFound(new { mensaje = resultado.Mensaje });
+
+        return StatusCode(resultado.StatusCode, new { mensaje = resultado.Mensaje });
+    }
+
     [HttpPatch("{id}/estado")]
     public async Task<IActionResult> CambiarEstado(int id, [FromBody] CambiarEstadoUsuarioDto request)
     {

@@ -22,6 +22,7 @@ Una base que ya tiene el esquema operativo anterior. Esa estructura, sin datos, 
 4. `20261104_sesion_generacion.sql`
 5. `20261105_mfa_persistencia.sql`
 6. `20261106_mfa_enrolamiento.sql`
+7. `20261110_usuario_eliminado.sql`
 
 Esos scripts son idempotentes. Una segunda ejecución no borra fichadas, no duplica asignaciones y no reescribe `MinutosAlmuerzo`. Las fichadas ya guardadas quedan con `ClaveIdempotencia` en NULL. Si `Empleado.TurnoId` existe, la primera ejecución copia la asignación abierta que todavía no tenga fila vigente; `EmpleadoTurno` pasa a ser la fuente canónica y la API no lee `TurnoId`.
 
@@ -36,3 +37,5 @@ Si la base es todavía anterior a las columnas de seguridad de `Usuario` o a `Fi
 `20261105_mfa_persistencia.sql` agrega `Usuario.MfaObligatorio` en 0, el secreto pendiente y su vencimiento, los contadores de usuario y los campos del desafío. No ejecuta `UPDATE` y no toca `TotpHabilitado`, `TotpSecretoCifrado`, `MfaOmitidoHasta`, `UltimoPasoTotp`, el hash, el rol, la empresa, el estado ni `TokenVersion`. Antes del índice único cuenta hashes duplicados en `CodigoRecuperacionMfa`. Si hay alguno, aborta sin borrar filas y sin crear el índice. `20261105_mfa_persistencia_rollback.sql` no se ejecuta en la instalación. Quita solo lo que agrega esa etapa.
 
 `20261106_mfa_enrolamiento.sql` crea `OperacionEnrolamientoMfa` y, solo si `CodigoRecuperacionMfa` está vacía, agrega `ConjuntoId` y `CreadoEn`. Si ya hay códigos, aborta sin reescribirlos y sin borrar filas. `20261106_mfa_enrolamiento_rollback.sql` no se ejecuta en la instalación.
+
+`20261110_usuario_eliminado.sql` agrega `Usuario.EliminadoEn` en NULL solo si falta. No ejecuta `UPDATE` y no borra usuarios, fichadas ni auditoría.

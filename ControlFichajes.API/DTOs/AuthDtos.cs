@@ -27,9 +27,12 @@ namespace ControlFichajes.API.DTOs
         public string Correo { get; set; } = string.Empty;
         public string Rol { get; set; } = string.Empty;
         public bool Activo { get; set; }
+        public bool InvitacionPendiente { get; set; }
         public bool RequiereCambioPassword { get; set; }
         public bool Bloqueado { get; set; }
         public DateTime? BloqueadoHasta { get; set; }
+        public bool TotpHabilitado { get; set; }
+        public bool MfaObligatorio { get; set; }
     }
 
     public class CambiarPasswordRequestDto

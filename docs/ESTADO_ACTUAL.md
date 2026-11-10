@@ -1,5 +1,7 @@
 # Estado actual
 
+Cierre del 10 de noviembre de 2026. Retomar desde `docs/CONTINUIDAD_AUTENTICACION.md`, sección «Cierre del 10 de noviembre de 2026». La API está en `feat/autenticacion-segura`, HEAD `2d31af0168080fcc9816d256bda8cd60d916892b`, con Correo saliente sin commit. El frontend está en `feat/autenticacion-sesiones-web`, HEAD `bd86edebaba63d741476a883c3d4260419c433a6`, también con esa pestaña sin commit. Ninguna rama tiene upstream. El correo de prueba desde Webmail llegó; el envío desde la API no está validado.
+
 La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 7D agrega `exigirMfa` a las invitaciones nuevas y el desafío `vinculacion_mfa_pendiente`. No cambia el alta tradicional ni las cuentas existentes. `Auth:PermitirEnrolamientoMfa` queda en falso. El SuperAdmin compartido no tiene MFA ni obligación. La desactivación voluntaria está en `POST /api/Auth/mfa/desactivar` y no depende de `Auth:PermitirEnrolamientoMfa`. Un factor obligatorio no se desactiva. El reemplazo, el restablecimiento administrativo y exigir MFA a cuentas que ya existen quedan para después.
 
 Cierre de la noche del 2 de noviembre de 2026. No se desplegó ni se mergeó a `main`.

@@ -16,7 +16,14 @@ namespace   ControlFichajes.API.Services
         Task<UsuarioListItemDto?> CambiarEstadoAsync(int usuarioId, bool activo);
         Task<UsuarioListItemDto?> CambiarRolAsync(int usuarioId, string rol);
         Task<IdentidadUpdateResult> CambiarIdentidadAsync(int usuarioId, string? nombreUsuario, string? correo);
+        Task<ExigirMfaResult> ExigirMfaAsync(int usuarioId);
+        Task<EliminarCuentaResult> EliminarCuentaAsync(int usuarioId);
+        Task<EliminarCuentaResult> CancelarInvitacionAsync(int usuarioId);
     }
 
     public readonly record struct IdentidadUpdateResult(int StatusCode, string Mensaje, UsuarioListItemDto? Usuario);
+
+    public readonly record struct ExigirMfaResult(int StatusCode, string Mensaje, string? Codigo, UsuarioListItemDto? Usuario);
+
+    public readonly record struct EliminarCuentaResult(int StatusCode, string Mensaje, string? Codigo);
 }

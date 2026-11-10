@@ -1,5 +1,12 @@
 # Pendientes
 
+Cierre del 10 de noviembre de 2026. El detalle está en `docs/CONTINUIDAD_AUTENTICACION.md`.
+
+- El correo de prueba desde Webmail llegó. El envío desde la API sigue sin validar.
+- Diagnosticar el último error de Invitar usuario. El log local registró `invitacion_envio_fallido` con `AuthenticationException` después de crear la invitación.
+- La decisión siguiente no tiene prompt de implementación: retirar Correo saliente, completar la pantalla de aceptación y, probado el flujo, dejar Nuevo usuario como única alta por invitación.
+- Esos cambios de Correo saliente siguen sin commit.
+
 Autenticación, 4 de noviembre de 2026. El detalle está en `docs/CONTINUIDAD_AUTENTICACION.md`.
 
 - La etapa 7D exige MFA solo en invitaciones nuevas. `Auth:PermitirEnrolamientoMfa` queda en falso. Siguen pendientes la desactivación, el reemplazo, el restablecimiento administrativo y exigir MFA a cuentas que ya existen. Esas funciones tienen que conservar los permisos actuales de rol y empresa.

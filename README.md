@@ -765,11 +765,15 @@ BloqueadoHasta
 UltimoIntentoFallido
 ```
 
-- En login, 5 verificaciones fallidas establecen un bloqueo de 15 minutos.
-  Actualmente este comportamiento también alcanza a `SuperAdmin`. El contador
-  se actualiza con la entidad de EF y no mediante un incremento SQL atómico.
-  Login devuelve `401` tanto para credenciales inválidas como para una cuenta
-  bloqueada o una contraseña temporal vencida/no válida.
+- En login, el tercer intento consecutivo con contraseña incorrecta establece
+  un bloqueo de 15 minutos para Administrador y RRHH. Los dos primeros se
+  rechazan sin bloquear. Una contraseña válida anterior al bloqueo reinicia
+  el contador. `SuperAdmin` no genera ese bloqueo y un bloqueo previo no le
+  impide continuar con credenciales válidas; si tiene MFA, el segundo factor
+  sigue siendo obligatorio. El contador se actualiza con la entidad de EF y
+  no mediante un incremento SQL atómico. Login devuelve `401` tanto para
+  credenciales inválidas como para una cuenta bloqueada o una contraseña
+  temporal vencida/no válida.
 
 - El flujo de cambio obligatorio emite un JWT con el claim
   `requiere_cambio_password=true`. Un middleware central consulta el estado

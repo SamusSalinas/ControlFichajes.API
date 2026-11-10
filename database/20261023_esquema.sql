@@ -208,6 +208,7 @@ CREATE TABLE `Usuario` (
   `TotpPendienteExpiraEn` datetime(6) DEFAULT NULL,
   `MfaIntentosFallidos` int NOT NULL DEFAULT 0,
   `MfaBloqueadoHasta` datetime(6) DEFAULT NULL,
+  `EliminadoEn` datetime(6) DEFAULT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `IX_Usuario_Correo` (`Correo`),
   KEY `IX_Usuario_EmpresaId` (`EmpresaId`),

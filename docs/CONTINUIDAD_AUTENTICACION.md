@@ -1,5 +1,7 @@
 # Continuidad de autenticación
 
+Para retomar, abrir la sección **Cierre del 10 de noviembre de 2026**. El cierre del 4 de noviembre queda abajo como antecedente.
+
 Cierre local del 4 de noviembre de 2026. El repositorio Git es `api/api-nueva-20261023`. El directorio padre del workspace no es el repositorio.
 
 No había un documento de continuidad de autenticación. `docs/ESTADO_ACTUAL.md` y `docs/PENDIENTES.md` describían el cierre de turnos del 2 de noviembre. Este archivo concentra la autenticación. Las copias de esas guías en el repositorio del frontend no se modificaron.
@@ -348,16 +350,56 @@ El capturador SMTP no está en el repositorio. La sección Capturador SMTP descr
 
 El bundle de este cierre es `C:\Users\Tinchota\Desktop\backups-control-fichajes\ControlFichajes-API-cierre-7c1-pendiente-revision.bundle`. Incluye el commit funcional y este commit de documentación. No incluye `appsettings.Development.local.json` ni las claves.
 
-## Próximo paso
+## Cierre del 10 de noviembre de 2026
 
-Revisar únicamente la etapa 7C.1 antes de autorizar otra implementación. No implementar la obligación de MFA, la vinculación restringida, la desactivación, el reemplazo ni la recuperación administrativa. No activar `Auth:PermitirEnrolamientoMfa`.
+Comprobado en esta PC con `git status -sb`, `git log -1` y `git rev-parse HEAD`. No hay upstream en ninguna de las dos ramas. No se hizo commit, push, fetch, pull, merge ni deploy. No se publicó ni se tocó producción.
+
+### Git
+
+API, clon `api/api-nueva-20261023`:
+
+- Rama: `feat/autenticacion-segura`.
+- HEAD: `2d31af0168080fcc9816d256bda8cd60d916892b`.
+- Asunto: `feat: permite desactivar el doble factor voluntario`.
+- Modificados, sin commit: `ControlFichajes.API/Program.cs`, `ControlFichajes.API/Security/AuthPolicy.cs`, `ControlFichajes.API/Services/AuditoriaSeguridadService.cs`, `ControlFichajes.API/appsettings.json`.
+- Sin seguimiento: `ControlFichajes.API.Tests/CorreoSalientePruebaTests.cs`, `ControlFichajes.API/Controllers/CorreoSalienteController.cs`, `ControlFichajes.API/DTOs/CorreoSalienteDtos.cs`, `ControlFichajes.API/Security/CorreoSalienteConfiguracion.cs`, `ControlFichajes.API/Services/CorreoPruebaService.cs`, `ControlFichajes.API/Services/ICorreoPruebaService.cs`.
+- Este cierre también deja sin commit `docs/CONTINUIDAD_AUTENTICACION.md`, `docs/ESTADO_ACTUAL.md`, `docs/PENDIENTES.md` y `docs/DECISIONES_TECNICAS.md`.
+
+Frontend, clon `frontend`:
+
+- Rama: `feat/autenticacion-sesiones-web`.
+- HEAD: `bd86edebaba63d741476a883c3d4260419c433a6`.
+- Asunto: `feat: retira el módulo de desarrollo Registros`.
+- Modificados, sin commit: `src/config/roles.js`, `src/views/administracion.js`.
+- Sin seguimiento: `scripts/check-correo-saliente.js`, `src/api/correo-saliente.js`, `src/components/correo-saliente-panel.js`.
+- Este cierre también deja sin commit `docs/ESTADO_ACTUAL.md`, `docs/PENDIENTES.md` y `docs/DECISIONES_TECNICAS.md`.
+
+Las cuatro guías duplicadas ya diferían entre los clones antes de este cierre. No se eligió una copia. Solo se agregó esta misma nota en `ESTADO_ACTUAL.md`, `PENDIENTES.md` y `DECISIONES_TECNICAS.md`.
+
+### Correo
+
+El usuario informó que un correo de prueba enviado desde Webmail llegó. El envío desde la API sigue sin validar. No se repitió ese envío en este cierre.
+
+El último **Invitar usuario** visto en el log de la API local creó la cuenta inactiva y la fila de invitación, y después falló el SMTP. El log dice `invitacion_envio_fallido` con `AuthenticationException`. Diagnosticar ese error queda pendiente. No se copió el detalle del servidor ni ninguna credencial.
+
+La configuración SMTP efectiva está en `appsettings.Development.local.json`, fuera de Git. El archivo versionado sigue con host, usuario, contraseña y remitente vacíos. En el laboratorio el puerto local es 465 y `Smtp:EnableSsl=true`, que el código traduce a TLS desde la conexión. `App:PublicBaseUrl` local arma `http://127.0.0.1:5173/aceptar-invitacion?token={token}`. El frontend no tiene pantalla para esa ruta.
+
+`GET /api/correo-saliente/estado`, con la sesión del SuperAdmin local y sin enviar correo, respondió 200. `configurado` fue falso porque la contraseña SMTP no estaba cargada. La respuesta solo trajo `remitente` y `configurado`. Una consulta anónima respondió 401. `dotnet test --filter CorreoSalientePruebaTests` dejó 5 correctas. `node scripts/check-correo-saliente.js` imprimió `correo saliente ok`.
+
+### Decisión para la próxima sesión
+
+El prompt de implementación sigue pendiente. No implementar hasta que exista:
+
+1. Retirar Correo saliente, la pestaña y los endpoints que están sin commit.
+2. Completar la pantalla de aceptación de la invitación.
+3. Cuando ese flujo esté probado, dejar **Nuevo usuario** como única acción de alta y que esa alta sea por invitación.
 
 ## Texto para una conversación nueva
 
 ```text
-Leé api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md.
-Después comprobá el estado real: rama, git status, git rev-parse HEAD y git rev-parse '@{upstream}'.
-No continúes si la rama no es `feat/autenticacion-segura` o si el árbol no está limpio. No hay upstream.
-La etapa 7C.1 está implementada en da38172767fd8a9d5da69d4116e26389c355e1f4 y pendiente de revisión final. Auth:PermitirEnrolamientoMfa queda en falso. El frontend sigue en 36dbe061c86035c60eaa79c56d1ebb02ea3e6e26, sin pantallas de desafío ni enrolamiento.
-El próximo paso es solo revisar 7C.1. No implementes otra etapa.
+Abrí api/api-nueva-20261023/docs/CONTINUIDAD_AUTENTICACION.md, sección «Cierre del 10 de noviembre de 2026».
+Comprobá rama y HEAD de los dos clones antes de editar. No hay upstream. Hay cambios sin commit; no los descartes.
+El correo de prueba desde Webmail llegó. El envío desde la API sigue sin validar. Diagnosticá el último error de Invitar usuario antes de cambiar el flujo.
+La decisión siguiente está anotada y su prompt de implementación sigue pendiente: retirar Correo saliente, completar la aceptación y, después de probarla, dejar Nuevo usuario como única alta por invitación.
+No publiques ni toques producción. No copies contraseñas ni tokens.
 ```

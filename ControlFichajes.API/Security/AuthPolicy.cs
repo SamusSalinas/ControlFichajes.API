@@ -121,6 +121,16 @@ public static class AuthPolicy
         return LeerEntero(configuration, "Auth:CierreVentanaSegundos", 60, minimo: 1);
     }
 
+    public static int CorreoPruebaLimite(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:CorreoPruebaLimite", 5, minimo: 1);
+    }
+
+    public static int CorreoPruebaVentanaSegundos(IConfiguration? configuration)
+    {
+        return LeerEntero(configuration, "Auth:CorreoPruebaVentanaSegundos", 60, minimo: 1);
+    }
+
     public static int MfaDesafioMinutos(IConfiguration? configuration)
     {
         return LeerEntero(configuration, "Auth:MfaDesafioMinutos", 5, minimo: 1);

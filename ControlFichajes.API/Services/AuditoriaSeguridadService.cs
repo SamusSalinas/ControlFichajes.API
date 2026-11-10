@@ -22,6 +22,8 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "bootstrap_deshabilitado",
         "usuario_alta",
         "usuario_estado",
+        "usuario_eliminado",
+        "usuario_eliminacion_rechazada",
         "usuario_rol",
         "usuario_identidad",
         "usuario_desbloqueo",
@@ -31,6 +33,8 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "invitacion_envio_fallido",
         "invitacion_aceptada",
         "invitacion_aceptacion_rechazada",
+        "invitacion_cancelada",
+        "invitacion_cancelacion_rechazada",
         "recuperacion_solicitada",
         "recuperacion_invalidada",
         "recuperacion_envio_aceptado",
@@ -51,7 +55,13 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "mfa_codigos_regenerados",
         "mfa_codigos_rechazados",
         "mfa_desactivado",
-        "mfa_desactivacion_rechazada"
+        "mfa_desactivacion_rechazada",
+        "mfa_obligacion_exigida",
+        "mfa_obligacion_rechazada",
+        "correo_prueba_enviado",
+        "correo_prueba_rechazado",
+        "correo_configuracion_guardada",
+        "correo_configuracion_rechazada"
     };
 
     private static readonly HashSet<string> Resultados = new(StringComparer.Ordinal)
@@ -71,6 +81,9 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "invitacion_anterior",
         "recuperacion_anterior",
         "smtp",
+        "configuracion",
+        "validacion",
+        "guardado",
         "reemplazo",
         "reutilizacion",
         "cierre",
@@ -86,11 +99,17 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "paso",
         "contexto",
         "ya_configurado",
+        "obligacion",
+        "enrolamiento",
         "operacion",
         "credencial",
         "recuperacion",
         "vinculacion",
-        "obligatorio"
+        "obligatorio",
+        "baja",
+        "invitacion_pendiente",
+        "no_pendiente",
+        "activa"
     };
 
     private readonly IDbContextFactory<AppDbContext> _contextFactory;

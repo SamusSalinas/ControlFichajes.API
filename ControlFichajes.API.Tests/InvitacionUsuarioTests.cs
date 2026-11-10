@@ -79,6 +79,30 @@ public class InvitacionUsuarioTests
     }
 
     [Fact]
+    public async Task CorreoDeCuentaEliminadaPermiteUnaNuevaInvitacion()
+    {
+        await using var context = CrearContexto();
+        var admin = await AgregarUsuarioAsync(context, AppRoles.Admin, 1, "admin.local");
+        var eliminada = await AgregarUsuarioAsync(context, AppRoles.Rrhh, 1, "martin.previo");
+        eliminada.Activo = false;
+        eliminada.EliminadoEn = DateTime.UtcNow;
+        eliminada.Correo = "martin.reuso@empresa.test";
+        await context.SaveChangesAsync();
+        var controller = CrearControlador(context, Principal(admin.Id, AppRoles.Admin, 1), new Buzon());
+
+        var alta = await controller.Invitar(Solicitud(1, "martin.nuevo", "martin.reuso@empresa.test", AppRoles.Rrhh));
+
+        Assert.Equal(StatusCodes.Status201Created, Assert.IsType<ObjectResult>(alta).StatusCode);
+        Assert.NotNull((await context.Usuario.SingleAsync(u => u.Id == eliminada.Id)).EliminadoEn);
+        Assert.NotEqual("martin.reuso@empresa.test", eliminada.Correo);
+        var nueva = await context.Usuario.SingleAsync(u => u.Correo == "martin.reuso@empresa.test");
+        Assert.NotEqual(eliminada.Id, nueva.Id);
+        Assert.False(nueva.Activo);
+        Assert.Null(nueva.EliminadoEn);
+        Assert.NotNull(nueva.InvitadoEn);
+    }
+
+    [Fact]
     public async Task InvitadoQuedaInactivoSinClaveUtilizableNiTokenEnLaRespuesta()
     {
         await using var context = CrearContexto();
@@ -132,6 +156,12 @@ public class InvitacionUsuarioTests
         Assert.NotEqual(invitaciones[0].TokenHash, invitaciones[1].TokenHash);
         Assert.Contains(await context.AuditoriaSeguridad.Select(a => a.Evento).ToListAsync(), e => e == "invitacion_invalidada");
         Assert.Equal(2, buzon.Mensajes.Count);
+        Assert.All(buzon.Mensajes, mensaje =>
+        {
+            Assert.Contains("Uno te invitó a crear tu acceso.", mensaje.Texto, StringComparison.Ordinal);
+            Assert.Contains("max-width:560px", mensaje.Html, StringComparison.Ordinal);
+            Assert.Contains(">Aceptar invitación</a>", mensaje.Html, StringComparison.Ordinal);
+        });
         Assert.NotEqual(TokenDelEnlace(buzon.Mensajes[0].Texto), TokenDelEnlace(buzon.Mensajes[1].Texto));
     }
 
@@ -147,9 +177,19 @@ public class InvitacionUsuarioTests
 
         var mensaje = Assert.Single(buzon.Mensajes);
         Assert.Equal("rrhh.nuevo@empresa.test", mensaje.Destinatario);
+        Assert.Equal("Invitación a Control de Accesos", mensaje.Asunto);
+        Assert.Contains("Control de Accesos", mensaje.Texto, StringComparison.Ordinal);
+        Assert.Contains("Uno te invitó a crear tu acceso.", mensaje.Texto, StringComparison.Ordinal);
+        Assert.Contains("La invitación vence el ", mensaje.Texto, StringComparison.Ordinal);
+        Assert.Contains(" UTC.", mensaje.Texto, StringComparison.Ordinal);
         Assert.Contains("http://127.0.0.1:5173/aceptar-invitacion?token=", mensaje.Texto, StringComparison.Ordinal);
-        Assert.Contains("http://127.0.0.1:5173/aceptar-invitacion?token=", mensaje.Html, StringComparison.Ordinal);
-        Assert.Contains("<p>", mensaje.Html, StringComparison.Ordinal);
+        Assert.Contains("max-width:560px", mensaje.Html, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap:anywhere", mensaje.Html, StringComparison.Ordinal);
+        Assert.Contains(">Aceptar invitación</a>", mensaje.Html, StringComparison.Ordinal);
+        var hrefs = System.Text.RegularExpressions.Regex.Matches(mensaje.Html, "href=\"([^\"]+)\"");
+        Assert.Equal(2, hrefs.Count);
+        Assert.Equal(hrefs[0].Groups[1].Value, hrefs[1].Groups[1].Value);
+        Assert.Equal(TokenDelEnlace(mensaje.Texto), TokenDelEnlace(hrefs[0].Groups[1].Value));
         var eventos = await context.AuditoriaSeguridad.Select(a => a.Evento).OrderBy(e => e).ToListAsync();
         Assert.Contains("invitacion_creada", eventos);
         Assert.Contains("invitacion_envio_aceptado", eventos);
