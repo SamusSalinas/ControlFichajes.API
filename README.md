@@ -323,7 +323,7 @@ La clave de laboratorio vive solo en `ControlFichajes.API/appsettings.Developmen
 
 ### Enrolamiento voluntario
 
-`Auth:PermitirEnrolamientoMfa` está en falso. Mientras siga así, iniciar, confirmar y regenerar responden 404. El frontend los presenta y, con la bandera apagada, muestra que la activación no está habilitada. No se exige MFA a las cuentas que ya existían.
+`Auth:PermitirEnrolamientoMfa` está en falso. Mientras siga así, iniciar, confirmar y regenerar responden 404. `GET /api/Auth/mfa/estado` sigue disponible para una sesión web: devuelve `totpHabilitado`, `mfaObligatorio` y `configuracionDisponible`, sin secretos ni códigos, e identifica la cuenta por la sesión. Un desafío de vinculación no lo autoriza. El cambio obligatorio de contraseña lo bloquea como al resto de la API. El frontend consulta ese estado al abrir Seguridad. No se exige MFA a las cuentas que ya existían.
 
 `POST /api/Auth/mfa/enrolamiento/iniciar` es autenticado. Sirve para una cuenta activa, sin MFA y sin cambio de contraseña pendiente, y pide la contraseña actual. Guarda un secreto nuevo cifrado con `totp-pendiente` y una operación ligada al usuario, a `TokenVersion` y a la sesión que la pidió. Vence a los `Auth:MfaEnrolamientoMinutos` (10). Responde la operación, la URI `otpauth` y la clave manual, con `Cache-Control: no-store`. No llama a un servicio externo para dibujar el código. Otro inicio invalida la operación anterior. Si MFA ya está configurado, responde `409` con `mfa_ya_configurado`.
 

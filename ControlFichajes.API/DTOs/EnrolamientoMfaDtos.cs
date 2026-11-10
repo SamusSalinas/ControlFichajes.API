@@ -2,6 +2,15 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ControlFichajes.API.DTOs;
 
+public class EstadoMfaDto
+{
+    public bool TotpHabilitado { get; set; }
+
+    public bool MfaObligatorio { get; set; }
+
+    public bool ConfiguracionDisponible { get; set; }
+}
+
 public class IniciarEnrolamientoMfaDto
 {
     [Required]

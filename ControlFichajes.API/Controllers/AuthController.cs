@@ -162,6 +162,33 @@ namespace ControlFichajes.API.Controllers
             return ResponderMfa(resultado, generacion);
         }
 
+        [HttpGet("mfa/estado")]
+        [Authorize]
+        public async Task<IActionResult> EstadoMfa()
+        {
+            SinCache();
+            if (ContextoDeLecturaRechazado())
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            if (!User.HasClaim("token_use", "web") || !TryUsuarioActual(out var usuarioId))
+                return Unauthorized(new { mensaje = "Sesión inválida." });
+
+            if (_enrolamiento == null)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { codigo = "mfa_no_disponible" });
+
+            var estado = await _enrolamiento.ConsultarEstadoAsync(usuarioId);
+            var version = User.FindFirstValue("token_version");
+            if (estado == null || !int.TryParse(version, out var tokenVersion) || tokenVersion != estado.TokenVersion)
+                return Unauthorized(new { mensaje = "Sesión inválida." });
+
+            return Ok(new EstadoMfaDto
+            {
+                TotpHabilitado = estado.TotpHabilitado,
+                MfaObligatorio = estado.MfaObligatorio,
+                ConfiguracionDisponible = AuthPolicy.PermitirEnrolamientoMfa(_configuration)
+            });
+        }
+
         [HttpPost("mfa/enrolamiento/iniciar")]
         [Authorize]
         public async Task<IActionResult> IniciarEnrolamiento([FromBody] IniciarEnrolamientoMfaDto? request)
@@ -551,6 +578,19 @@ namespace ControlFichajes.API.Controllers
             }
 
             return true;
+        }
+
+        private bool ContextoDeLecturaRechazado()
+        {
+            if (ProteccionSolicitudSesion.Evaluar(Request, _configuration) != ClaseSolicitudSesion.Rechazada)
+                return false;
+
+            if (!Request.Headers.TryGetValue(ProteccionSolicitudSesion.Encabezado, out var valores) ||
+                valores.Count != 1 ||
+                !string.Equals(valores[0], ProteccionSolicitudSesion.Valor, StringComparison.Ordinal))
+                return true;
+
+            return Request.Headers.ContainsKey("Origin");
         }
 
         private bool TryUsuarioActual(out int usuarioId)

@@ -41,6 +41,8 @@ public interface IEnrolamientoMfaService
         string? ip,
         CancellationToken cancellationToken = default);
 
+    Task<EstadoMfaCuenta?> ConsultarEstadoAsync(int usuarioId, CancellationToken cancellationToken = default);
+
     Task<ResultadoEnrolamiento> RegenerarAsync(
         int usuarioId,
         string? password,
@@ -48,6 +50,15 @@ public interface IEnrolamientoMfaService
         string? codigoRecuperacion,
         string? ip,
         CancellationToken cancellationToken = default);
+}
+
+public sealed class EstadoMfaCuenta
+{
+    public bool TotpHabilitado { get; init; }
+
+    public bool MfaObligatorio { get; init; }
+
+    public int TokenVersion { get; init; }
 }
 
 public enum EstadoEnrolamiento
@@ -119,6 +130,19 @@ public sealed partial class EnrolamientoMfaService : IEnrolamientoMfaService
     internal Func<CancellationToken, Task>? DespuesDeConfirmar { get; set; }
 
     internal Func<DateTime>? Reloj { get; set; }
+
+    public async Task<EstadoMfaCuenta?> ConsultarEstadoAsync(int usuarioId, CancellationToken cancellationToken = default)
+    {
+        return await _context.Usuario.AsNoTracking()
+            .Where(u => u.Id == usuarioId && u.Activo)
+            .Select(u => new EstadoMfaCuenta
+            {
+                TotpHabilitado = u.TotpHabilitado,
+                MfaObligatorio = u.MfaObligatorio,
+                TokenVersion = u.TokenVersion
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+    }
 
     public async Task<ResultadoEnrolamiento> IniciarAsync(
         int usuarioId,

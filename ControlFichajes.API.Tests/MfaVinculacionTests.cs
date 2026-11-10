@@ -97,6 +97,29 @@ public class MfaVinculacionTests
         return await Controlador(http, armado).VerificarMfa(new VerificarMfaDto { Desafio = desafio, Codigo = codigo });
     }
 
+    [Fact]
+    public async Task DesafioDeVinculacionNoConsultaElEstado()
+    {
+        await using var context = Memoria();
+        var armado = await ArmarAsync(context, obligatorio: true);
+        var http = Http(generacion: Guid.NewGuid());
+        var login = Assert.IsType<UnauthorizedObjectResult>(await Controlador(http, armado).Login(new LoginRequestDto { Email = armado.Usuario.Correo, Password = Clave }));
+        var desafio = Texto(login.Value, "desafio");
+        Assert.False(string.IsNullOrWhiteSpace(desafio));
+
+        http.User = new ClaimsPrincipal(new ClaimsIdentity());
+        Assert.IsType<UnauthorizedObjectResult>(await Controlador(http, armado).EstadoMfa());
+
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, desafio),
+            new Claim("token_use", "web"),
+            new Claim("token_version", "0")
+        ], "test"));
+        Assert.IsType<UnauthorizedObjectResult>(await Controlador(http, armado).EstadoMfa());
+        Assert.False((await context.Usuario.SingleAsync(u => u.Id == armado.Usuario.Id)).TotpHabilitado);
+    }
+
     private static async Task<Armado> ArmarAsync(AppDbContext context, bool obligatorio, bool cambio = false, bool habilitar = true)
     {
         if (!await context.Empresa.AnyAsync())

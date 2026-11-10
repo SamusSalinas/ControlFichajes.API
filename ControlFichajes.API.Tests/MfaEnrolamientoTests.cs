@@ -309,6 +309,58 @@ public class MfaEnrolamientoTests
     }
 
     [Fact]
+    public async Task EstadoDevuelveIndicadoresSinSecretosYSinDependerDeLaBandera()
+    {
+        await using var context = Memoria();
+        var armado = await ArmarAsync(context, totp: true);
+        armado.Usuario.MfaObligatorio = true;
+        await context.SaveChangesAsync();
+        var http = new DefaultHttpContext { User = Principal(armado.Usuario.Id, null) };
+        http.Response.Body = new MemoryStream();
+
+        var apagado = Assert.IsType<OkObjectResult>(await Controlador(context, http, armado, habilitar: false).EstadoMfa());
+        var dto = Assert.IsType<EstadoMfaDto>(apagado.Value);
+        Assert.True(dto.TotpHabilitado);
+        Assert.True(dto.MfaObligatorio);
+        Assert.False(dto.ConfiguracionDisponible);
+        Assert.Equal("no-store", http.Response.Headers.CacheControl.ToString());
+        var json = System.Text.Json.JsonSerializer.Serialize(dto);
+        Assert.DoesNotContain("secreto", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("codigo", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("uri", json, StringComparison.OrdinalIgnoreCase);
+
+        http.Request.Headers[ProteccionSolicitudSesion.Encabezado] = ProteccionSolicitudSesion.Valor;
+        var mismaOrigen = Assert.IsType<OkObjectResult>(await Controlador(context, http, armado, habilitar: false).EstadoMfa());
+        Assert.False(Assert.IsType<EstadoMfaDto>(mismaOrigen.Value).ConfiguracionDisponible);
+        http.Request.Headers.Origin = "http://127.0.0.1:9";
+        var origen = await Controlador(context, http, armado, habilitar: false).EstadoMfa();
+        Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(origen).StatusCode);
+
+        http.Request.Headers.Remove(ProteccionSolicitudSesion.Encabezado);
+        http.Request.Headers.Remove("Origin");
+        http.User = new ClaimsPrincipal(new ClaimsIdentity());
+        Assert.IsType<UnauthorizedObjectResult>(await Controlador(context, http, armado).EstadoMfa());
+
+        http.User = Principal(armado.Usuario.Id, null);
+        armado.Usuario.RequiereCambioPassword = true;
+        await context.SaveChangesAsync();
+        var bloqueado = new DefaultHttpContext
+        {
+            User = Principal(armado.Usuario.Id, null)
+        };
+        bloqueado.Request.Method = HttpMethods.Get;
+        bloqueado.Request.Path = "/api/Auth/mfa/estado";
+        bloqueado.Response.Body = new MemoryStream();
+        var middleware = new WebSessionSecurityMiddleware(_ =>
+        {
+            bloqueado.Response.StatusCode = StatusCodes.Status200OK;
+            return Task.CompletedTask;
+        });
+        await middleware.InvokeAsync(bloqueado, context, Configuracion());
+        Assert.Equal(StatusCodes.Status403Forbidden, bloqueado.Response.StatusCode);
+    }
+
+    [Fact]
     public async Task InicioExigeCachePrivadoYRechazaOrigen()
     {
         await using var context = Memoria();
