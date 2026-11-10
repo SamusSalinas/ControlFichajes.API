@@ -2,7 +2,7 @@
 
 Rama: `feat/autenticacion-segura`. No hay PR abierto. La publicación de esta rama sigue sujeta a la autorización de Samu.
 
-El resumen del frontend está en la rama `fix/smtp-cifrado-selector` del repositorio `control-accesos-frontend`, archivo `docs/PR_SUMMARY.md`. El arreglo del selector es `ac4e07ce010e6c30c445dea5cf453ea3943c8a67` y su paquete todavía no está desplegado. El panel publicado sigue siendo `a2e60f09f3d94de743dc2c4949d8ea524a36bd92`.
+El resumen del frontend está en la rama `fix/smtp-cifrado-selector` del repositorio `control-accesos-frontend`, archivo `docs/PR_SUMMARY.md`. El arreglo del selector es `ac4e07ce010e6c30c445dea5cf453ea3943c8a67`. El panel publicado es `frontend-5cce792.tar.gz`, verificado por el SHA-256 `6a4020bda4fb115fd3af842efd723d189c0c55ac6126548dc240051e3c523e49`. Reemplaza a `a2e60f09f3d94de743dc2c4949d8ea524a36bd92`.
 
 ## Objetivo
 
@@ -23,7 +23,7 @@ Incluye el ingreso, la sesión web, las invitaciones, el enrolamiento y la verif
 
 ## Dependencias entre frontend y API
 
-El panel publicado en `a2e60f09f3d94de743dc2c4949d8ea524a36bd92` llama a `/api` en el mismo origen y envía `X-CF-Solicitud` y `X-CF-Generacion` en el login renovable. Depende de las invitaciones, el desbloqueo, el estado MFA y la baja lógica de esta rama. El selector de correo de ese panel puede mostrar «TLS desde la conexión» y enviar `starttls`; el arreglo está en el frontend y no forma parte de este SHA. Esta API depende de ese panel para el ingreso desde el navegador y de `Cors:AllowedOrigins` con el origen exacto `https://controldeaccesos.online`.
+El panel publicado, `frontend-5cce792.tar.gz`, llama a `/api` en el mismo origen y envía `X-CF-Solicitud` y `X-CF-Generacion` en el login renovable. Depende de las invitaciones, el desbloqueo, el estado MFA y la baja lógica de esta rama. Su selector envía el cifrado visible; el arreglo no forma parte de este SHA de la API. Esta API depende de ese panel para el ingreso desde el navegador y de `Cors:AllowedOrigins` con el origen exacto `https://controldeaccesos.online`.
 
 ## Pruebas del entorno aislado
 
@@ -65,7 +65,7 @@ La reversión usable no es el commit `50843f8` solo: hace falta `rollback/50843f
 
 - No hay PR abierto. Publicar la rama sigue sujeto a la autorización de Samu.
 - La fichada nueva desde el lector en producción queda pendiente.
-- Falta repetir en producción el guardado SMTP con `tls-conexion` cuando esté publicado el panel `frontend-5cce792.tar.gz`.
+- Falta la prueba manual en producción del guardado y de la entrega del correo.
 - Falta vincular y validar un autenticador en producción con el enrolamiento habilitado.
 - La prueba del túnel biométrico local sigue sin las variables de entorno que exige.
 
