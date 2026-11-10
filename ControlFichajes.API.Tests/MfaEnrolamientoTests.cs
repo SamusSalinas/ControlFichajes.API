@@ -378,6 +378,132 @@ public class MfaEnrolamientoTests
         Assert.Equal(StatusCodes.Status403Forbidden, ((ObjectResult)rechazado).StatusCode);
     }
 
+    [Fact]
+    public async Task DesactivacionVoluntariaConBanderaApagadaRevocaYPermiteEntrarConPassword()
+    {
+        await using var context = Memoria();
+        var armado = await ArmarAsync(context);
+        var inicio = await armado.Servicio.IniciarAsync(armado.Usuario.Id, Clave, null, "127.0.0.1");
+        var confirmado = await armado.Servicio.ConfirmarAsync(armado.Usuario.Id, inicio.Operacion, ValidadorTotp.CodigoEn(SecretoDe(inicio), Instante), null, "127.0.0.1");
+        var codigo = confirmado.Codigos![0];
+        var version = (await context.Usuario.SingleAsync()).TokenVersion;
+        context.RefreshToken.Add(new RefreshToken
+        {
+            UsuarioId = armado.Usuario.Id,
+            TokenHash = new string('a', 64),
+            FamiliaId = Guid.NewGuid(),
+            ExpiraEn = Instante.AddDays(1),
+            CreadaEn = Instante,
+            TokenVersion = version
+        });
+        await context.SaveChangesAsync();
+        var ingreso = await armado.Auth.IngresarAsync(new LoginRequestDto { Email = armado.Usuario.Correo, Password = Clave }, ModoSesionMfa.Tradicional, null, "127.0.0.1");
+        Assert.NotNull(ingreso.Desafio);
+        var config = Configuracion(enrolamiento: false);
+        var servicio = new EnrolamientoMfaService(context, config, armado.Protector, new PasswordHasher<Usuario>(), new LimiteMfaPorIp(), new Captura(armado.Auditoria))
+        {
+            Reloj = () => Instante.AddSeconds(30)
+        };
+        var desactivado = await servicio.DesactivarAsync(armado.Usuario.Id, Clave, ValidadorTotp.CodigoEn(SecretoDe(inicio), Instante.AddSeconds(30)), null, "127.0.0.1");
+        Assert.Equal(EstadoEnrolamiento.Desactivado, desactivado.Estado);
+        Assert.Equal(EnrolamientoMfaService.MensajeDesactivado, desactivado.Mensaje);
+        Assert.Null(desactivado.Codigos);
+        var usuario = await context.Usuario.SingleAsync();
+        Assert.False(usuario.TotpHabilitado);
+        Assert.False(usuario.MfaObligatorio);
+        Assert.Null(usuario.TotpSecretoCifrado);
+        Assert.Null(usuario.TotpPendienteCifrado);
+        Assert.Equal(version + 1, usuario.TokenVersion);
+        Assert.Equal(10, await context.CodigoRecuperacionMfa.CountAsync(c => c.UsadoEn != null));
+        Assert.NotNull((await context.DesafioMfa.SingleAsync()).ConsumidoEn);
+        Assert.NotNull((await context.RefreshToken.SingleAsync()).RevocadaEn);
+        Assert.Contains(armado.Auditoria, item => item.Evento == "mfa_desactivado" && item.Detalle == "codigo");
+        Assert.DoesNotContain(armado.Auditoria, item => (item.Detalle ?? "").Contains(Clave) || (item.Detalle ?? "").Contains(codigo));
+        var posterior = await armado.Auth.IngresarAsync(new LoginRequestDto { Email = armado.Usuario.Correo, Password = Clave }, ModoSesionMfa.Tradicional, null, "127.0.0.1");
+        Assert.Equal(EstadoIngreso.Autenticado, posterior.Estado);
+        Assert.Null(posterior.Desafio);
+        var repetido = await servicio.DesactivarAsync(armado.Usuario.Id, Clave, null, codigo, "127.0.0.1");
+        Assert.Equal(EstadoEnrolamiento.Invalido, repetido.Estado);
+        Assert.Equal(version + 1, (await context.Usuario.SingleAsync()).TokenVersion);
+
+        var http = new DefaultHttpContext { Response = { Body = new MemoryStream() } };
+        http.Connection.RemoteIpAddress = IPAddress.Parse("127.0.0.1");
+        http.User = Principal(armado.Usuario.Id, null);
+        var otro = await UsuarioAsync(context, "voluntario");
+        var otroArmado = await ArmarSobreAsync(context, otro, armado);
+        var inicioOtro = await otroArmado.Servicio.IniciarAsync(otro.Id, Clave, null, "127.0.0.1");
+        await otroArmado.Servicio.ConfirmarAsync(otro.Id, inicioOtro.Operacion, ValidadorTotp.CodigoEn(SecretoDe(inicioOtro), Instante), null, "127.0.0.1");
+        http.User = Principal(otro.Id, null);
+        var apagado = new EnrolamientoMfaService(context, config, armado.Protector, new PasswordHasher<Usuario>(), new LimiteMfaPorIp(), new Captura(armado.Auditoria))
+        {
+            Reloj = () => Instante.AddSeconds(30)
+        };
+        var controller = new AuthController(
+            armado.Auth,
+            new AgenteAuthService(context, new PasswordHasher<AgenteInstalacion>(), new JwtTokenService(config)),
+            config,
+            mfa: armado.Verificacion,
+            enrolamiento: apagado)
+        {
+            ControllerContext = new ControllerContext { HttpContext = http }
+        };
+        var respuesta = await controller.DesactivarMfa(new DesactivarMfaDto
+        {
+            Password = Clave,
+            Codigo = ValidadorTotp.CodigoEn(SecretoDe(inicioOtro), Instante.AddSeconds(30))
+        });
+        var ok = Assert.IsType<OkObjectResult>(respuesta);
+        Assert.Equal("no-store", http.Response.Headers.CacheControl.ToString());
+        Assert.Contains("mensaje", ok.Value!.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("codigo", ok.Value.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False((await context.Usuario.SingleAsync(u => u.Id == otro.Id)).TotpHabilitado);
+    }
+
+    [Fact]
+    public async Task MfaObligatorioYCredencialIncorrectaNoDesactivan()
+    {
+        await using var context = Memoria();
+        var armado = await ArmarAsync(context);
+        var inicio = await armado.Servicio.IniciarAsync(armado.Usuario.Id, Clave, null, "127.0.0.1");
+        var confirmado = await armado.Servicio.ConfirmarAsync(armado.Usuario.Id, inicio.Operacion, ValidadorTotp.CodigoEn(SecretoDe(inicio), Instante), null, "127.0.0.1");
+        var usuario = await context.Usuario.SingleAsync();
+        usuario.MfaObligatorio = true;
+        var version = usuario.TokenVersion;
+        await context.SaveChangesAsync();
+        armado.Servicio.Reloj = () => Instante.AddSeconds(30);
+        var obligatorio = await armado.Servicio.DesactivarAsync(armado.Usuario.Id, Clave, ValidadorTotp.CodigoEn(SecretoDe(inicio), Instante.AddSeconds(30)), null, "127.0.0.1");
+        Assert.Equal(EstadoEnrolamiento.Obligatorio, obligatorio.Estado);
+        var guardado = await context.Usuario.SingleAsync();
+        Assert.True(guardado.TotpHabilitado);
+        Assert.NotNull(guardado.TotpSecretoCifrado);
+        Assert.Equal(version, guardado.TokenVersion);
+        Assert.Equal(0, await context.CodigoRecuperacionMfa.CountAsync(c => c.UsadoEn != null));
+        var credencial = await armado.Servicio.DesactivarAsync(armado.Usuario.Id, "otra", null, confirmado.Codigos![0], "127.0.0.1");
+        Assert.Equal(EstadoEnrolamiento.Credencial, credencial.Estado);
+        Assert.True((await context.Usuario.SingleAsync()).TotpHabilitado);
+        Assert.Contains(armado.Auditoria, item => item.Evento == "mfa_desactivacion_rechazada" && item.Detalle == "obligatorio");
+        Assert.Contains(armado.Auditoria, item => item.Detalle == "credencial");
+    }
+
+    [Fact]
+    public async Task DesactivacionesConcurrentesAplicanElCambioUnaVez()
+    {
+        await using var context = Memoria();
+        var armado = await ArmarAsync(context);
+        var inicio = await armado.Servicio.IniciarAsync(armado.Usuario.Id, Clave, null, "127.0.0.1");
+        await armado.Servicio.ConfirmarAsync(armado.Usuario.Id, inicio.Operacion, ValidadorTotp.CodigoEn(SecretoDe(inicio), Instante), null, "127.0.0.1");
+        var version = (await context.Usuario.SingleAsync()).TokenVersion;
+        armado.Servicio.Reloj = () => Instante.AddSeconds(30);
+        var codigo = ValidadorTotp.CodigoEn(SecretoDe(inicio), Instante.AddSeconds(30));
+        var resultados = await Task.WhenAll(
+            armado.Servicio.DesactivarAsync(armado.Usuario.Id, Clave, codigo, null, "127.0.0.1"),
+            armado.Servicio.DesactivarAsync(armado.Usuario.Id, Clave, codigo, null, "127.0.0.1"));
+        Assert.Equal(1, resultados.Count(r => r.Estado == EstadoEnrolamiento.Desactivado));
+        var usuario = await context.Usuario.SingleAsync();
+        Assert.False(usuario.TotpHabilitado);
+        Assert.Equal(version + 1, usuario.TokenVersion);
+    }
+
     private static byte[] SecretoDe(ResultadoEnrolamiento inicio)
     {
         var secreto = inicio.Uri!.Split("secret=", StringSplitOptions.None)[1].Split('&')[0];
@@ -454,7 +580,7 @@ public class MfaEnrolamientoTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
     }
 
-    private static IConfiguration Configuracion(int intentosUsuario = 5)
+    private static IConfiguration Configuracion(int intentosUsuario = 5, bool enrolamiento = true)
     {
         return new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -462,7 +588,7 @@ public class MfaEnrolamientoTests
             ["Jwt:Issuer"] = "ControlFichajes.Tests",
             ["Jwt:Audience"] = "ControlFichajes.Frontend.Tests",
             ["Jwt:ExpireMinutes"] = "60",
-            ["Auth:PermitirEnrolamientoMfa"] = "true",
+            ["Auth:PermitirEnrolamientoMfa"] = enrolamiento ? "true" : "false",
             ["Auth:MfaIntentosUsuario"] = intentosUsuario.ToString(),
             ["Auth:MfaIntentosDesafio"] = "5",
             ["Auth:MfaEnrolamientoMinutos"] = "10",

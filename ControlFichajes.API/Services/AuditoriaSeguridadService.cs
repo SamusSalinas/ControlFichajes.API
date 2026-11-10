@@ -49,7 +49,9 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "mfa_enrolamiento_confirmado",
         "mfa_enrolamiento_rechazado",
         "mfa_codigos_regenerados",
-        "mfa_codigos_rechazados"
+        "mfa_codigos_rechazados",
+        "mfa_desactivado",
+        "mfa_desactivacion_rechazada"
     };
 
     private static readonly HashSet<string> Resultados = new(StringComparer.Ordinal)
@@ -87,7 +89,8 @@ public sealed class AuditoriaSeguridadService : IAuditoriaSeguridad
         "operacion",
         "credencial",
         "recuperacion",
-        "vinculacion"
+        "vinculacion",
+        "obligatorio"
     };
 
     private readonly IDbContextFactory<AppDbContext> _contextFactory;

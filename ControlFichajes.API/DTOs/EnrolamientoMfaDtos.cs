@@ -51,6 +51,19 @@ public class ConfirmarVinculacionMfaDto
     public string Codigo { get; set; } = string.Empty;
 }
 
+public class DesactivarMfaDto
+{
+    [Required]
+    [MaxLength(255)]
+    public string Password { get; set; } = string.Empty;
+
+    [MaxLength(12)]
+    public string? Codigo { get; set; }
+
+    [MaxLength(40)]
+    public string? CodigoRecuperacion { get; set; }
+}
+
 public class RegenerarCodigosMfaDto
 {
     [Required]

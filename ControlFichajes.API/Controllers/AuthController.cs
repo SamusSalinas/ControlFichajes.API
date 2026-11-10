@@ -289,6 +289,34 @@ namespace ControlFichajes.API.Controllers
             return ResponderEnrolamiento(resultado, inicio: false);
         }
 
+        [HttpPost("mfa/desactivar")]
+        [Authorize]
+        public async Task<IActionResult> DesactivarMfa([FromBody] DesactivarMfaDto? request)
+        {
+            SinCache();
+            if (ProteccionSolicitudSesion.Evaluar(Request, _configuration) == ClaseSolicitudSesion.Rechazada)
+                return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Solicitud rechazada." });
+
+            var tieneCodigo = !string.IsNullOrWhiteSpace(request?.Codigo);
+            var tieneRecuperacion = !string.IsNullOrWhiteSpace(request?.CodigoRecuperacion);
+            if (tieneCodigo == tieneRecuperacion)
+                return BadRequest(new { codigo = tieneCodigo ? "mfa_codigo_ambiguo" : "mfa_codigo_requerido" });
+
+            if (!User.HasClaim("token_use", "web") || _enrolamiento == null || !TryUsuarioActual(out var usuarioId))
+                return Unauthorized(new { mensaje = "Sesión inválida." });
+
+            var resultado = await _enrolamiento.DesactivarAsync(
+                usuarioId,
+                request?.Password,
+                request?.Codigo,
+                request?.CodigoRecuperacion,
+                Ip());
+            if (resultado.Estado == EstadoEnrolamiento.Desactivado)
+                BorrarCookie(NombreCookie(GeneracionSesion.Leer(Request)));
+
+            return ResponderEnrolamiento(resultado, inicio: false);
+        }
+
         [HttpPost("refresh")]
         [AllowAnonymous]
         [EnableRateLimiting(PoliticaLimiteRefresh)]
@@ -531,6 +559,10 @@ namespace ControlFichajes.API.Controllers
                     return StatusCode(StatusCodes.Status403Forbidden, new { mensaje = "Debés cambiar tu contraseña antes de continuar." });
                 case EstadoEnrolamiento.YaConfigurado:
                     return Conflict(new { codigo = "mfa_ya_configurado" });
+                case EstadoEnrolamiento.Obligatorio:
+                    return Conflict(new { codigo = "mfa_obligatorio" });
+                case EstadoEnrolamiento.Desactivado when resultado.Mensaje != null:
+                    return Ok(new { mensaje = resultado.Mensaje });
                 case EstadoEnrolamiento.Bloqueado:
                     return Unauthorized(new { codigo = "mfa_bloqueado" });
                 case EstadoEnrolamiento.Credencial:

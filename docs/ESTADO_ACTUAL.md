@@ -1,6 +1,6 @@
 # Estado actual
 
-La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 7D agrega `exigirMfa` a las invitaciones nuevas y el desafío `vinculacion_mfa_pendiente`. No cambia el alta tradicional ni las cuentas existentes. `Auth:PermitirEnrolamientoMfa` queda en falso. El SuperAdmin compartido no tiene MFA ni obligación. La desactivación, el reemplazo, el restablecimiento administrativo y exigir MFA a cuentas que ya existen quedan para después.
+La autenticación segura local está en `docs/CONTINUIDAD_AUTENTICACION.md`, rama `feat/autenticacion-segura`. La etapa 7D agrega `exigirMfa` a las invitaciones nuevas y el desafío `vinculacion_mfa_pendiente`. No cambia el alta tradicional ni las cuentas existentes. `Auth:PermitirEnrolamientoMfa` queda en falso. El SuperAdmin compartido no tiene MFA ni obligación. La desactivación voluntaria está en `POST /api/Auth/mfa/desactivar` y no depende de `Auth:PermitirEnrolamientoMfa`. Un factor obligatorio no se desactiva. El reemplazo, el restablecimiento administrativo y exigir MFA a cuentas que ya existen quedan para después.
 
 Cierre de la noche del 2 de noviembre de 2026. No se desplegó ni se mergeó a `main`.
 

@@ -50,6 +50,14 @@ public interface IEnrolamientoMfaService
         string? codigoRecuperacion,
         string? ip,
         CancellationToken cancellationToken = default);
+
+    Task<ResultadoEnrolamiento> DesactivarAsync(
+        int usuarioId,
+        string? password,
+        string? codigo,
+        string? codigoRecuperacion,
+        string? ip,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class EstadoMfaCuenta
@@ -68,6 +76,8 @@ public enum EstadoEnrolamiento
     Credencial,
     Restringido,
     YaConfigurado,
+    Obligatorio,
+    Desactivado,
     Contexto,
     Bloqueado,
     NoDisponible,
@@ -97,6 +107,7 @@ public sealed partial class EnrolamientoMfaService : IEnrolamientoMfaService
 {
     public const string MensajeConfirmado = "MFA configurado. Volvé a iniciar sesión.";
     public const string MensajeRegenerado = "Códigos regenerados. Volvé a iniciar sesión.";
+    public const string MensajeDesactivado = "Doble factor desactivado. Volvé a iniciar sesión con tu contraseña.";
 
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
@@ -393,6 +404,161 @@ public sealed partial class EnrolamientoMfaService : IEnrolamientoMfaService
         }
     }
 
+    public async Task<ResultadoEnrolamiento> DesactivarAsync(
+        int usuarioId,
+        string? password,
+        string? codigo,
+        string? codigoRecuperacion,
+        string? ip,
+        CancellationToken cancellationToken = default)
+    {
+        var pideTotp = !string.IsNullOrWhiteSpace(codigo);
+        var pideRecuperacion = !string.IsNullOrWhiteSpace(codigoRecuperacion);
+        if (pideTotp == pideRecuperacion)
+            return Invalido();
+
+        if (!_limite.Permitir("verificacion", ip, AuthPolicy.MfaVerificacionLimite(_configuration), TimeSpan.FromSeconds(AuthPolicy.MfaVerificacionVentanaSegundos(_configuration))))
+            return Limitado();
+
+        await _serie.WaitAsync(cancellationToken);
+        try
+        {
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuarioId, cancellationToken);
+            var usuario = await _context.Usuario.SingleOrDefaultAsync(u => u.Id == usuarioId, cancellationToken);
+            if (usuario == null || !usuario.Activo || !usuario.TotpHabilitado)
+                return Invalido();
+
+            await _context.Entry(usuario).ReloadAsync(cancellationToken);
+            var ahora = Reloj?.Invoke() ?? DateTime.UtcNow;
+            if (!usuario.Activo || !usuario.TotpHabilitado)
+                return Invalido();
+
+            if (usuario.RequiereCambioPassword)
+                return Restringido();
+
+            if (!PasswordValida(usuario, password))
+            {
+                await AuditarAsync("mfa_desactivacion_rechazada", "rechazado", usuario.Id, "credencial");
+                return Credencial();
+            }
+
+            if (usuario.MfaBloqueadoHasta.HasValue && usuario.MfaBloqueadoHasta > ahora)
+            {
+                await AuditarAsync("mfa_desactivacion_rechazada", "rechazado", usuario.Id, "bloqueado");
+                return Bloqueado();
+            }
+
+            if (usuario.MfaBloqueadoHasta.HasValue && usuario.MfaBloqueadoHasta <= ahora)
+            {
+                usuario.MfaIntentosFallidos = 0;
+                usuario.MfaBloqueadoHasta = null;
+            }
+
+            var recuperacion = pideRecuperacion
+                ? await BuscarCodigoAsync(usuario.Id, codigoRecuperacion, cancellationToken)
+                : null;
+            var totpOk = false;
+            if (pideTotp)
+            {
+                if (string.IsNullOrWhiteSpace(usuario.TotpSecretoCifrado))
+                {
+                    await AuditarAsync("mfa_desactivacion_rechazada", "rechazado", usuario.Id, "clave");
+                    return NoDisponible();
+                }
+
+                byte[] secreto;
+                try
+                {
+                    secreto = _protector.Abrir(usuario.Id, ProtectorSecretosMfa.PropositoTotpActivo, usuario.TotpSecretoCifrado);
+                }
+                catch (ProteccionSecretoNoDisponibleException)
+                {
+                    await AuditarAsync("mfa_desactivacion_rechazada", "rechazado", usuario.Id, "clave");
+                    return NoDisponible();
+                }
+                catch (ProteccionSecretoRechazadaException)
+                {
+                    await AuditarAsync("mfa_desactivacion_rechazada", "rechazado", usuario.Id, "cifrado");
+                    return NoDisponible();
+                }
+
+                try
+                {
+                    var totp = CodigoTotp().IsMatch(codigo!.Trim())
+                        ? ValidadorTotp.Verificar(secreto, codigo.Trim(), ahora)
+                        : new ResultadoTotp(false, 0);
+                    totpOk = totp.Coincide && (!usuario.UltimoPasoTotp.HasValue || totp.Paso > usuario.UltimoPasoTotp.Value);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(secreto);
+                }
+            }
+
+            if ((pideTotp && !totpOk) || (pideRecuperacion && recuperacion == null))
+                return await FallarDesactivacionAsync(alcance, usuario, ahora, pideRecuperacion ? "recuperacion" : "codigo", cancellationToken);
+
+            await _context.Entry(usuario).ReloadAsync(cancellationToken);
+            if (!usuario.Activo || !usuario.TotpHabilitado)
+                return Invalido();
+
+            if (usuario.MfaObligatorio)
+            {
+                await AuditarAsync("mfa_desactivacion_rechazada", "rechazado", usuario.Id, "obligatorio");
+                return Obligatorio();
+            }
+
+            var codigos = await _context.CodigoRecuperacionMfa
+                .Where(c => c.UsuarioId == usuario.Id && c.UsadoEn == null)
+                .ToListAsync(cancellationToken);
+            foreach (var item in codigos)
+                item.UsadoEn = ahora;
+
+            if (recuperacion != null && recuperacion.UsadoEn == null)
+                recuperacion.UsadoEn = ahora;
+
+            var operaciones = await _context.OperacionEnrolamientoMfa
+                .Where(o => o.UsuarioId == usuario.Id && o.ConsumidaEn == null && o.InvalidadaEn == null)
+                .ToListAsync(cancellationToken);
+            foreach (var operacion in operaciones)
+                operacion.InvalidadaEn = ahora;
+
+            usuario.TotpHabilitado = false;
+            usuario.TotpSecretoCifrado = null;
+            usuario.TotpPendienteCifrado = null;
+            usuario.TotpPendienteExpiraEn = null;
+            usuario.UltimoPasoTotp = null;
+            usuario.MfaIntentosFallidos = 0;
+            usuario.MfaBloqueadoHasta = null;
+            usuario.TokenVersion++;
+            await InvalidarDesafiosAsync(usuario.Id, ahora, cancellationToken);
+            await RevocacionSesiones.MarcarTodasAsync(_context, usuario.Id, ahora, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+            if (AntesDeConfirmar != null)
+                await AntesDeConfirmar(cancellationToken);
+
+            await alcance.ConfirmarAsync(cancellationToken);
+            if (DespuesDeConfirmar != null)
+                await DespuesDeConfirmar(cancellationToken);
+
+            await AuditarAsync("mfa_desactivado", "aceptado", usuario.Id, pideRecuperacion ? "recuperacion" : "codigo");
+            return new ResultadoEnrolamiento
+            {
+                Estado = EstadoEnrolamiento.Desactivado,
+                Mensaje = MensajeDesactivado
+            };
+        }
+        catch (Exception ex)
+        {
+            Registrar("mfa_desactivado", ex);
+            return Error();
+        }
+        finally
+        {
+            _serie.Release();
+        }
+    }
+
     public async Task<ResultadoEnrolamiento> RegenerarAsync(
         int usuarioId,
         string? password,
@@ -598,6 +764,23 @@ public sealed partial class EnrolamientoMfaService : IEnrolamientoMfaService
         return Invalido();
     }
 
+    private async Task<ResultadoEnrolamiento> FallarDesactivacionAsync(
+        AlcanceUsuario alcance,
+        Usuario usuario,
+        DateTime ahora,
+        string detalle,
+        CancellationToken cancellationToken)
+    {
+        usuario.MfaIntentosFallidos++;
+        if (usuario.MfaIntentosFallidos >= AuthPolicy.MfaIntentosUsuario(_configuration))
+            usuario.MfaBloqueadoHasta = ahora.AddMinutes(AuthPolicy.MfaBloqueoMinutos(_configuration));
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await alcance.ConfirmarAsync(cancellationToken);
+        await AuditarAsync("mfa_desactivacion_rechazada", "rechazado", usuario.Id, detalle);
+        return Invalido();
+    }
+
     private async Task<ResultadoEnrolamiento> FallarUsuarioAsync(
         AlcanceUsuario alcance,
         Usuario usuario,
@@ -689,6 +872,8 @@ public sealed partial class EnrolamientoMfaService : IEnrolamientoMfaService
     private static ResultadoEnrolamiento Restringido() => new() { Estado = EstadoEnrolamiento.Restringido };
 
     private static ResultadoEnrolamiento Contexto() => new() { Estado = EstadoEnrolamiento.Contexto };
+
+    private static ResultadoEnrolamiento Obligatorio() => new() { Estado = EstadoEnrolamiento.Obligatorio };
 
     private static ResultadoEnrolamiento Bloqueado() => new() { Estado = EstadoEnrolamiento.Bloqueado };
 
