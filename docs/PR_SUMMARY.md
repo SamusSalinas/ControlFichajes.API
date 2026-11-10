@@ -2,7 +2,7 @@
 
 Rama: `feat/autenticacion-segura`. No hay PR abierto. La publicación de esta rama sigue sujeta a la autorización de Samu.
 
-El resumen del frontend está en la rama `feat/autenticacion-sesiones-web` del repositorio `control-accesos-frontend`, archivo `docs/PR_SUMMARY.md`. Ese PR tampoco está abierto. El build publicado del panel es `a2e60f09f3d94de743dc2c4949d8ea524a36bd92`.
+El resumen del frontend está en la rama `fix/smtp-cifrado-selector` del repositorio `control-accesos-frontend`, archivo `docs/PR_SUMMARY.md`. El arreglo del selector es `ac4e07ce010e6c30c445dea5cf453ea3943c8a67` y su paquete todavía no está desplegado. El panel publicado sigue siendo `a2e60f09f3d94de743dc2c4949d8ea524a36bd92`.
 
 ## Objetivo
 
@@ -23,7 +23,7 @@ Incluye el ingreso, la sesión web, las invitaciones, el enrolamiento y la verif
 
 ## Dependencias entre frontend y API
 
-El panel publicado en `a2e60f09f3d94de743dc2c4949d8ea524a36bd92` llama a `/api` en el mismo origen y envía `X-CF-Solicitud` y `X-CF-Generacion` en el login renovable. Depende de las invitaciones, el desbloqueo, el estado MFA y la baja lógica de esta rama. Esta API depende de ese panel para el ingreso desde el navegador y de `Cors:AllowedOrigins` con el origen exacto `https://controldeaccesos.online`.
+El panel publicado en `a2e60f09f3d94de743dc2c4949d8ea524a36bd92` llama a `/api` en el mismo origen y envía `X-CF-Solicitud` y `X-CF-Generacion` en el login renovable. Depende de las invitaciones, el desbloqueo, el estado MFA y la baja lógica de esta rama. El selector de correo de ese panel puede mostrar «TLS desde la conexión» y enviar `starttls`; el arreglo está en el frontend y no forma parte de este SHA. Esta API depende de ese panel para el ingreso desde el navegador y de `Cors:AllowedOrigins` con el origen exacto `https://controldeaccesos.online`.
 
 ## Pruebas del entorno aislado
 
@@ -50,8 +50,10 @@ Se ejecutaron contra la copia `tesis_ensayo`, no contra producción.
 Separadas del ensayo aislado.
 
 - El navegador, en `https://controldeaccesos.online/api/Auth/Login`, con `Origin: https://controldeaccesos.online`, `X-CF-Solicitud: 1` y una generación válida, recibió HTTP 403 `{"mensaje":"Solicitud rechazada."}`.
-- La corrección es incluir exactamente `https://controldeaccesos.online` en `Cors:AllowedOrigins`. `App:PublicBaseUrl` no decide ese rechazo.
-- Después de esa corrección, el login y la visualización de empleados y fichadas quedaron confirmados en producción.
+- La instancia desplegada permite exactamente `https://controldeaccesos.online` en `Cors:AllowedOrigins`. `App:PublicBaseUrl` usa la misma dirección y no decide ese rechazo.
+- Después de permitir ese origen, el login y la visualización de empleados y fichadas quedaron confirmados en producción.
+- El SMTP del panel persiste en `/app/smtp.panel.json`. El guardado crea `smtp.panel.json.tmp` en el mismo directorio y después lo mueve encima del archivo. La ruta no es configurable. El montaje de solo ese archivo no alcanza: el usuario 1654 puede escribir el archivo, pero no crear el temporal si `/app` no es escribible. El directorio de la aplicación queda montado sobre `/app` y pertenece a 1654. Al recrear el contenedor hay que conservar ese directorio y la misma `Smtp:ProtectionKey`, sin volver a copiar la imagen encima, porque eso borraría el archivo. El archivo guarda el sobre cifrado y no la clave.
+- El enrolamiento MFA está habilitado con `Auth:PermitirEnrolamientoMfa=true`. La clave es la sección `Auth:TotpClaves`: `Activa` nombra un identificador de 1 a 32 caracteres, formado por letras, dígitos, `_` o `-`, y `Lectura` tiene una entrada con ese mismo identificador. El valor es Base64, también con `-` y `_`, y decodifica a 32 bytes. Vincular usa esa clave; validar un autenticador ya guardado también, y no consulta la bandera. Esos valores no están en el repositorio. `appsettings.json` versionado sigue con el enrolamiento en falso y `TotpClaves` vacío.
 
 ## Resultados
 
@@ -63,10 +65,12 @@ La reversión usable no es el commit `50843f8` solo: hace falta `rollback/50843f
 
 - No hay PR abierto. Publicar la rama sigue sujeto a la autorización de Samu.
 - La fichada nueva desde el lector en producción queda pendiente.
+- Falta repetir en producción el guardado SMTP con `tls-conexion` cuando esté publicado el panel `frontend-5cce792.tar.gz`.
+- Falta vincular y validar un autenticador en producción con el enrolamiento habilitado.
 - La prueba del túnel biométrico local sigue sin las variables de entorno que exige.
 
 ## Despliegue y reversión
 
-El despliegue de hoy usa el SHA `f56a851119b9d140975ef4d80c80148e103da865`, los cinco scripts en el orden de arriba y el origen `https://controldeaccesos.online` en `Cors:AllowedOrigins`.
+El despliegue de hoy usa el SHA `f56a851119b9d140975ef4d80c80148e103da865`, los cinco scripts en el orden de arriba, el origen `https://controldeaccesos.online` en `Cors:AllowedOrigins`, el directorio de la aplicación montado en `/app` y `Auth:PermitirEnrolamientoMfa` habilitado. Las claves quedan fuera de Git.
 
 Para revertir la API sin restaurar la base, usar la rama `rollback/50843f8-eliminado`, commit `a012fc24517b4c83d31cd254e679e9f721b5752f`. Esa variante respeta la baja al listar, autenticar y reactivar. La columna `Usuario.EliminadoEn` permanece.
