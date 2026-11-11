@@ -17,7 +17,6 @@ jobs:
           fetch-depth: 0 # Requerido para que el agente tenga acceso al diff completo
 
       - name: Run Antigravity Review Agent
-        uses: anguillanneuf/run-antigravity-cli@v1
+        uses: anguillanneuf/run-antigravity-cli@126f1bc7865cbcf3784cf764c96d3eb7f4d0b5d9
         with:
           api-key: ${{ secrets.GEMINI_API_KEY }}
-
