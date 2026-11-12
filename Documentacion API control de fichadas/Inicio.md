@@ -7,6 +7,7 @@ indicaciones tecnicas de `ControlFichajes.API`.
 
 - [[API/01-Contrato-y-autenticacion|Contrato y autenticacion]]
 - [[API/02-Agentes-biometricos|Agentes biometricos]]
+- [[API/03-Seguridad-web|Seguridad web, sesiones y MFA]]
 - [[Administracion/01-Empresas-y-sucursales|Empresas y sucursales]]
 - [[Administracion/02-Usuarios|Usuarios y contrasenas]]
 - [[Administracion/03-Departamentos|Departamentos]]
@@ -62,3 +63,7 @@ agregar credenciales, JWT, `clientSecret`, cadenas de conexion ni plantillas
 biometricas.
 
 Documentacion de Obsidian: [enlaces internos](https://help.obsidian.md/Linking+notes+and+files/Internal+links).
+
+## Revision de main
+
+Documentacion contrastada con `main` en `042523ce776996b5b48c1e49981cf6566f89363b` (11 de noviembre de 2026), merge de autenticacion segura. Esto refleja el codigo integrado; no implica despliegue.

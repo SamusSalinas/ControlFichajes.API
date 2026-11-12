@@ -49,6 +49,31 @@ El rollback manual esta en el mismo script. El README advierte que no debe
 eliminarse una columna que el binario desplegado mapea; conservar el esquema
 aditivo durante un rollback de binario.
 
+## Autenticacion, sesiones y MFA
+
+Para instalaciones existentes, los cambios posteriores de seguridad se
+aplican con scripts incrementales, en orden:
+
+```text
+20261103_autenticacion_seguridad.sql
+20261104_sesion_generacion.sql
+20261105_mfa_persistencia.sql
+20261106_mfa_enrolamiento.sql
+20261110_usuario_eliminado.sql
+```
+
+El esquema limpio `20261023_esquema.sql` ya incorpora estas estructuras. Los
+scripts incrementales no se vuelven a ejecutar despues de ese snapshot. El
+README de `database/` describe el orden completo para bases existentes y las
+condiciones de cada script.
+
+Los cambios agregan persistencia para invitaciones y recuperacion de
+contrasena, auditoria, sesiones renovables y generaciones de cookie, desafios
+y secretos MFA, codigos de recuperacion y la marca de baja logica
+`Usuario.EliminadoEn`. Antes de ejecutar cualquier script en un entorno real,
+respaldar la base, verificar el esquema y seguir la secuencia autorizada; no
+ejecutar rollbacks como parte de una instalacion.
+
 ## Observaciones de fichadas
 
 La tabla `FichadaObservacion` tiene relacion 1:1 con `Fichada` y usa:

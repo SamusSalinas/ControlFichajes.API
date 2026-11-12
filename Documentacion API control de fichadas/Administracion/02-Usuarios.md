@@ -1,29 +1,36 @@
 # Usuarios
 
-Volver al [[Inicio|indice]] o consultar [[API/01-Contrato-y-autenticacion|login y bootstrap]].
+Volver al [[Inicio|indice]], consultar [[API/01-Contrato-y-autenticacion|login y bootstrap]] o ver [[API/03-Seguridad-web|seguridad web, sesiones y MFA]].
 
 ## Rutas
 
 ```text
 GET    /api/usuarios
 POST   /api/usuarios
+POST   /api/usuarios/invitar
+POST   /api/usuarios/{id}/reenviar-invitacion
+POST   /api/usuarios/{id}/cancelar-invitacion
+POST   /api/usuarios/{id}/exigir-mfa
+POST   /api/usuarios/{id}/eliminar
 PATCH  /api/usuarios/{id}/estado
 PATCH  /api/usuarios/{id}/rol
+PATCH  /api/usuarios/{id}/identidad
 POST   /api/usuarios/{id}/restablecer-password
 POST   /api/usuarios/{id}/desbloquear
 POST   /api/auth/cambiar-password
 ```
 
-No existe borrado fisico de usuarios. La baja/reactivacion se realiza con
-`PATCH /estado` y conserva identidad, empresa, rol, fichadas, relaciones e
-historial.
+`PATCH /estado` desactiva o reactiva una cuenta sin eliminarla. `POST
+/eliminar` es una baja logica distinta; el esquema conserva la marca
+`Usuario.EliminadoEn`, no un borrado fisico. Las operaciones sobre cuentas
+siguen sujetas al alcance del operador y del tenant.
 
 ## Alcance por rol
 
 | Rol | Alcance |
 | --- | --- |
 | `SuperAdmin` | Lista y administra usuarios `ADMIN`/`RRHH` de cualquier empresa. No administra a otro `SuperAdmin`, no se opera a si mismo y no crea ni asigna `SuperAdmin`. |
-| `ADMIN` | Lista usuarios de su empresa y crea, desactiva, reactiva, restablece o desbloquea usuarios `RRHH` de esa empresa. No cambia roles ni opera sobre otras cuentas/empresas. |
+| `ADMIN` | Lista usuarios de su empresa y administra usuarios `RRHH` de esa empresa segun cada operacion. No cambia roles ni opera sobre otras cuentas/empresas. |
 | `RRHH` | Sin acceso administrativo a usuarios. |
 
 Para crear un usuario, `ADMIN` solo puede crear `RRHH` de su empresa; el
@@ -82,9 +89,29 @@ el listado queda global. `ADMIN` solo lista su propia empresa y `RRHH` no puede
 acceder al listado.
 
 Ambos PATCH devuelven `200` con `mensaje` y el DTO seguro bajo `usuario`. Un
-cambio efectivo incrementa `TokenVersion` una vez e invalida JWT web anteriores;
-enviar el valor actual es idempotente. El cambio no altera otros atributos de
-la cuenta. El usuario inactivo sigue apareciendo en el listado.
+cambio efectivo incrementa `TokenVersion` una vez e invalida JWT web anteriores
+y sesiones renovables; enviar el valor actual es idempotente. El cambio no
+altera otros atributos de la cuenta. El usuario inactivo sigue apareciendo en
+el listado.
+
+## Invitacion y MFA obligatorio
+
+`POST /api/usuarios/invitar` crea una cuenta pendiente y envia una invitacion
+sin recibir una contrasena. `POST /api/usuarios/{id}/reenviar-invitacion`
+emite un token nuevo; `POST /api/usuarios/{id}/cancelar-invitacion` cancela el
+flujo pendiente. La aceptacion anonima define la contrasena y activa la cuenta,
+pero no inicia sesion. Los tokens vencidos, usados o invalidados no identifican
+la cuenta en la respuesta.
+
+Una invitacion puede exigir MFA para la cuenta nueva. Tambien existe
+`POST /api/usuarios/{id}/exigir-mfa` para una cuenta administrable. Si MFA es
+obligatorio, no puede desactivarse desde la cuenta. El detalle del desafio,
+enrolamiento y recuperacion de MFA esta en
+[[API/03-Seguridad-web|seguridad web, sesiones y MFA]].
+
+`PATCH /api/usuarios/{id}/identidad` actualiza la identidad segun permisos y
+alcance. Los cambios de identidad, como los de estado y rol, revocan las
+sesiones web del usuario.
 
 ## Contrasenas y bloqueo
 
@@ -116,9 +143,6 @@ Un JWT con `requiere_cambio_password=true` solo puede llamar a
 `403`. Los JWT web protegidos deben tener usuario activo y un
 `token_version` entero coincidente con la base; si falta o difiere, responden
 `401`. Esta validacion no se aplica a tokens `token_use=agent`.
-
-La documentacion del README indica como deuda: no se incorporan rate limiting,
-respuestas `423`/`429` ni incremento atomico de intentos.
 
 No existe una ruta administrativa para definir directamente la contrasena
 definitiva de otra cuenta: el flujo es restablecerla y que el usuario complete

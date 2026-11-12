@@ -52,6 +52,14 @@ Las variables de configuracion documentadas son:
 es un ejemplo sin credenciales reales; `Jwt__Key` debe ser largo, aleatorio y
 secreto.
 
+Las rutas de invitacion y recuperacion usan `App:PublicBaseUrl` para formar sus
+enlaces. El correo saliente se administra por
+[[API/03-Seguridad-web|la API de correo saliente]] o mediante configuracion
+local del servidor. El cifrado de secretos MFA requiere provisionar
+`Auth:TotpClaves:Activa` y `Auth:TotpClaves:Lectura` fuera del repositorio y
+respaldarlas de forma segura. No copiar claves, contrasenas SMTP ni URLs con
+tokens a la boveda o a la plantilla de variables.
+
 ## Construccion y operacion
 
 ```bash

@@ -1,11 +1,10 @@
 # Contrato HTTP y autenticacion
 
-Volver al [[Inicio|indice]] o consultar [[API/02-Agentes-biometricos|agentes biometricos]].
+Volver al [[Inicio|indice]], consultar [[API/02-Agentes-biometricos|agentes biometricos]] o ver [[API/03-Seguridad-web|seguridad web, sesiones y MFA]].
 
 ## Autenticacion web
 
-Salvo login web/agente y bootstrap, las operaciones protegidas requieren un
-JWT:
+Las operaciones web protegidas requieren un JWT de acceso:
 
 ```http
 Authorization: Bearer <token>
@@ -23,9 +22,11 @@ Content-Type: application/json
 }
 ```
 
-La respuesta contiene `token` y `mensaje`. Las contrasenas se almacenan como
-hash mediante `PasswordHasher<Usuario>`; nunca deben almacenarse ni devolverse
-en texto plano.
+Un login normal responde con `token` y `mensaje`. Si la cuenta tiene TOTP
+habilitado, primero responde con un desafio MFA y no emite JWT ni cookie. Las
+contrasenas se almacenan como hash mediante `PasswordHasher<Usuario>`; nunca
+deben almacenarse ni devolverse en texto plano. Ver
+[[API/03-Seguridad-web|el flujo de sesiones y MFA]].
 
 ## Flujo de autenticacion web
 
@@ -33,7 +34,10 @@ en texto plano.
 flowchart TD
     Start["Cliente envia login"] --> Valid{"Credenciales validas"}
     Valid -- No --> Reject["401: rechazar"]
-    Valid -- Si --> Token["Emitir JWT web"]
+    Valid -- Si --> MFA{"Requiere segundo factor"}
+    MFA -- Si --> Challenge["Verificar desafio MFA"]
+    MFA -- No --> Token["Emitir JWT web"]
+    Challenge --> Token
     Token --> Role{"Rol"}
     Role -- "SuperAdmin" --> Global["Sin empresa_id; seleccionar tenant con X-Empresa-Id"]
     Role -- "ADMIN o RRHH" --> Tenant["Usar empresa_id del JWT"]
@@ -43,8 +47,11 @@ flowchart TD
 
 ## Bootstrap del primer usuario
 
-`POST /api/auth/bootstrap` solo funciona si la tabla `Usuario` esta vacia. La
-empresa debe existir y el usuario inicial queda con rol `ADMIN`:
+`POST /api/auth/bootstrap` esta deshabilitado por defecto y responde `404`,
+incluso si la tabla `Usuario` esta vacia. Solo un laboratorio local puede
+habilitarlo de forma explicita mediante `Auth:PermitirBootstrap`; aun asi,
+requiere una tabla vacia, la empresa debe existir y el usuario inicial queda
+con rol `ADMIN`:
 
 ```http
 POST /api/auth/bootstrap
@@ -59,9 +66,9 @@ Content-Type: application/json
 }
 ```
 
-Devuelve un JWT. Si ya hay usuarios, responde `409 Conflict`; a partir de ese
-momento se crean usuarios con un administrador autenticado. El bootstrap no
-crea un `SuperAdmin`.
+Si se habilita localmente, devuelve un JWT. Si ya hay usuarios, responde
+`409 Conflict`; no crea un `SuperAdmin`. En el funcionamiento normal, el
+bootstrap no se utiliza.
 
 ## Roles y contexto de empresa
 
@@ -93,7 +100,8 @@ usan exclusivamente el tenant de su JWT.
 
 ## Alta posterior de usuarios
 
-`POST /api/usuarios` permite crear usuarios despues del bootstrap. Ejemplo:
+`POST /api/usuarios` permite altas con contrasena segun la configuracion y los
+permisos del operador. Ejemplo:
 
 ```http
 POST /api/usuarios
@@ -115,22 +123,27 @@ tenant del JWT. El rol `ADMIN` enviado por ese operador se rechaza con `400`.
 `SuperAdmin` puede crear `ADMIN` o `RRHH`, pero `X-Empresa-Id` debe coincidir
 con `body.empresaId`.
 
-El recorrido inicial es bootstrap de una sola vez; los usuarios posteriores se
-crean desde un contexto autenticado:
+Tambien existe el alta por invitacion, que no recibe contrasena y envia un
+enlace de aceptacion. El flujo y sus rutas estan en
+[[API/03-Seguridad-web|seguridad web, sesiones y MFA]].
+
+Los usuarios se crean desde un contexto autenticado:
 
 ```mermaid
 flowchart LR
-    Empty["Tabla Usuario vacia"] --> Bootstrap["POST /api/auth/bootstrap"]
-    Bootstrap --> Admin["Primer usuario: ADMIN"]
-    Admin --> Create["POST /api/usuarios"]
+    Admin["ADMIN autenticado"] --> Create["POST /api/usuarios"]
+    Admin --> Invite["POST /api/usuarios/invitar"]
     SuperAdmin["SuperAdmin autenticado"] --> Create
+    SuperAdmin --> Invite
     Create --> Roles["ADMIN o RRHH"]
+    Invite --> Roles
 ```
 
 ## Rutas relacionadas
 
 - [[Administracion/01-Empresas-y-sucursales|Empresas y sucursales]]
 - [[Administracion/02-Usuarios|Gestion de usuarios]]
+- [[API/03-Seguridad-web|Sesiones, MFA, invitaciones y recuperacion]]
 - [[Operacion/01-Empleados-y-huellas|Empleados y huellas]]
 - [[Operacion/02-Fichadas|Fichadas]]
 - [[Operacion/03-Turnos-y-jornadas|Turnos y jornadas]]
