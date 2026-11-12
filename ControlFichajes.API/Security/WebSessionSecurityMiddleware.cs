@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using ControlFichajes.API.Data;
+using ControlFichajes.API.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,7 +16,7 @@ public sealed class WebSessionSecurityMiddleware
         _next = next;
     }
 
-    public async Task InvokeAsync(HttpContext context, AppDbContext dbContext)
+    public async Task InvokeAsync(HttpContext context, AppDbContext dbContext, IConfiguration? configuration = null)
     {
         if (context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null ||
             context.User.Identity?.IsAuthenticated != true ||
@@ -46,6 +47,12 @@ public sealed class WebSessionSecurityMiddleware
             return;
         }
 
+        if (!await SesionVigenteAsync(context, dbContext, usuario, configuration))
+        {
+            await RejectAsync(context, StatusCodes.Status401Unauthorized, "Sesión inválida.");
+            return;
+        }
+
         if (usuario.RequiereCambioPassword && !EsCambioPasswordPermitido(context.Request))
         {
             await RejectAsync(
@@ -56,6 +63,39 @@ public sealed class WebSessionSecurityMiddleware
         }
 
         await _next(context);
+    }
+
+    private static async Task<bool> SesionVigenteAsync(
+        HttpContext context,
+        AppDbContext dbContext,
+        Usuario usuario,
+        IConfiguration? configuration)
+    {
+        var sid = context.User.FindFirstValue("sid");
+        if (string.IsNullOrWhiteSpace(sid))
+            return true;
+
+        if (!Guid.TryParse(sid, out var familiaId))
+            return false;
+
+        var ahora = DateTime.UtcNow;
+        var vigente = await dbContext.RefreshToken
+            .AsNoTracking()
+            .SingleOrDefaultAsync(r =>
+                r.FamiliaId == familiaId &&
+                r.UsuarioId == usuario.Id &&
+                r.RevocadaEn == null &&
+                r.ReemplazadaPorId == null);
+
+        if (vigente == null || vigente.TokenVersion != usuario.TokenVersion || vigente.ExpiraEn <= ahora)
+            return false;
+
+        var inicio = await dbContext.RefreshToken
+            .AsNoTracking()
+            .Where(r => r.FamiliaId == familiaId && r.UsuarioId == usuario.Id)
+            .MinAsync(r => (DateTime?)r.CreadaEn);
+
+        return inicio.HasValue && inicio.Value.AddDays(AuthPolicy.RefreshExpireDays(configuration)) > ahora;
     }
 
     private static bool EsCambioPasswordPermitido(HttpRequest request)

@@ -11,6 +11,7 @@
 
 # Local application settings
 appsettings.*.local.json
+smtp.panel.json
 
 # Private keys and certificates
 *.key

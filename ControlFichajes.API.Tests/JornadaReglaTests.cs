@@ -300,7 +300,7 @@ public class JornadaReglaTests
     }
 
     [Fact]
-    public async Task Turno_NoSeBorraSiTieneAsignacionVigenteOHistorica()
+    public async Task Turno_SeBorraSiSoloTieneAsignacionHistorica()
     {
         await using var context = Contexto();
         context.Empresa.Add(new Empresa { Id = 1, NombreFantasia = "A", RazonSocial = "A", CUIT = "30" });
@@ -315,16 +315,42 @@ public class JornadaReglaTests
         });
         await context.SaveChangesAsync();
         var service = new TurnoService(context, new TurnoValidacionRules());
+        var controller = new TurnosController(service)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = Web(AppRoles.Rrhh) } }
+        };
+        Assert.IsType<ForbidResult>(await controller.DeleteTurno(3));
+        Assert.True((await context.Turno.FindAsync(3))!.Activo);
+
+        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = Web(AppRoles.Admin) } };
+        Assert.IsType<NoContentResult>(await controller.DeleteTurno(3));
+        Assert.False((await context.Turno.FindAsync(3))!.Activo);
+        Assert.NotEmpty(context.EmpleadoTurno);
+    }
+
+    [Fact]
+    public async Task Turno_NoSeBorraSiTieneAsignacionVigente()
+    {
+        await using var context = Contexto();
+        context.Empresa.Add(new Empresa { Id = 1, NombreFantasia = "A", RazonSocial = "A", CUIT = "30" });
+        context.Empleado.Add(Empleado(5, 1));
+        context.Turno.Add(new Turno { Id = 3, EmpresaId = 1, Nombre = "Noche", Activo = true });
+        context.EmpleadoTurno.Add(new EmpleadoTurno
+        {
+            EmpleadoId = 5,
+            TurnoId = 3,
+            FechaInicio = new DateTime(2026, 1, 1)
+        });
+        await context.SaveChangesAsync();
+        var service = new TurnoService(context, new TurnoValidacionRules());
         var resultado = await service.EliminarAsync(3, 1);
         Assert.False(resultado.Exito);
         Assert.True((await context.Turno.FindAsync(3))!.Activo);
 
         var controller = new TurnosController(service)
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = Web(AppRoles.Rrhh) } }
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = Web(AppRoles.Admin) } }
         };
-        Assert.IsType<ForbidResult>(await controller.DeleteTurno(3));
-        controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = Web(AppRoles.Admin) } };
         Assert.IsType<ConflictObjectResult>(await controller.DeleteTurno(3));
     }
 

@@ -11,6 +11,7 @@ description: Consultar y mantener las guías de arquitectura, estado, pendientes
 - @../../docs/ESTADO_ACTUAL.md
 - @../../docs/PENDIENTES.md
 - @../../docs/DECISIONES_TECNICAS.md
+- @../../docs/PR_SUMMARY.md
 
 Antes de modificar comportamiento, leer esos cuatro archivos. No copiar su contenido a esta regla.
 
@@ -23,3 +24,5 @@ Al cerrar un cambio verificado, actualizar el documento que corresponda:
 - elección que haya que respetar después: `docs/DECISIONES_TECNICAS.md`
 
 No anotar secretos, connection strings, tokens, `clientSecret` ni datos biométricos. No dar por desplegado o mergeado un cambio que no se haya publicado.
+
+Para cada PR, mantener `docs/PR_SUMMARY.md` en este repositorio. El resumen cubre objetivo, alcance, cambios principales, dependencias con el otro repositorio, pruebas, resultados, pendientes, despliegue y reversión. Ese archivo es la descripción del PR. No incluir contraseñas, tokens, cadenas de conexión, volcados ni imágenes Docker.

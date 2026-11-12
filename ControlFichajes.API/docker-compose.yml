@@ -10,4 +10,5 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      Auth__PermitirBootstrap: "false"
     network_mode: host

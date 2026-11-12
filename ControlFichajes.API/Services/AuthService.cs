@@ -5,8 +5,8 @@ using ControlFichajes.API.DTOs;
 using ControlFichajes.API.Models;
 using ControlFichajes.API.Security;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ControlFichajes.API.Services
 {
@@ -15,31 +15,67 @@ namespace ControlFichajes.API.Services
         private readonly AppDbContext _context;
         private readonly IPasswordHasher<Usuario> _passwordHasher;
         private readonly ITokenService _tokenService;
+        private readonly IAuditoriaSeguridad? _auditoria;
+        private readonly ILogger<AuthService>? _logger;
+        private readonly IConfiguration? _configuration;
+        private readonly IProtectorSecretosMfa? _protector;
+        private readonly ILimiteMfaPorIp? _limite;
+        private const int IntentosAntesDelBloqueo = 3;
+        private const int MinutosDeBloqueo = 15;
 
         public AuthService(
             AppDbContext context,
             IPasswordHasher<Usuario> passwordHasher,
-            ITokenService tokenService)
+            ITokenService tokenService,
+            IAuditoriaSeguridad? auditoria = null,
+            ILogger<AuthService>? logger = null,
+            IConfiguration? configuration = null,
+            IProtectorSecretosMfa? protector = null,
+            ILimiteMfaPorIp? limite = null)
         {
             _context = context;
             _passwordHasher = passwordHasher;
             _tokenService = tokenService;
+            _auditoria = auditoria;
+            _logger = logger;
+            _configuration = configuration;
+            _protector = protector;
+            _limite = limite;
         }
 
         public async Task<AuthResponseDto?> LoginAsync(LoginRequestDto loginDto)
         {
+            var resultado = await IngresarAsync(loginDto, ModoSesionMfa.Tradicional, null, null);
+            return resultado.Estado == EstadoIngreso.Autenticado ? resultado.Respuesta : null;
+        }
+
+        public async Task<ResultadoIngreso> IngresarAsync(
+            LoginRequestDto loginDto,
+            string modo,
+            Guid? generacion,
+            string? ip)
+        {
             var correo = NormalizarCorreo(loginDto.Email);
             if (string.IsNullOrWhiteSpace(correo))
-                return null;
+                return Invalido();
 
             var usuario = await _context.Usuario
-                .FirstOrDefaultAsync(u => u.Correo == correo && u.Activo);
+                .FirstOrDefaultAsync(u => u.Correo == correo && u.Activo && u.EliminadoEn == null);
 
             if (usuario == null)
-                return null;
+            {
+                await _context.SaveChangesAsync();
+                await AuditarAsync("login_fallido", "rechazado", null, correo, null);
+                return Invalido();
+            }
 
-            if (usuario.BloqueadoHasta.HasValue && usuario.BloqueadoHasta > DateTime.UtcNow)
-                return null;
+            var exentoDeBloqueo = AppRoles.IsSuperAdmin(usuario.Rol);
+            if (!exentoDeBloqueo && usuario.BloqueadoHasta.HasValue && usuario.BloqueadoHasta > DateTime.UtcNow)
+            {
+                await _context.SaveChangesAsync();
+                await AuditarAsync("login_bloqueado", "rechazado", usuario.Id, null, null);
+                return Invalido();
+            }
 
             var passwordResult = _passwordHasher.VerifyHashedPassword(
                 usuario,
@@ -48,26 +84,141 @@ namespace ControlFichajes.API.Services
 
             if (passwordResult == PasswordVerificationResult.Failed)
             {
-                usuario.IntentosFallidos++;
-                usuario.UltimoIntentoFallido = DateTime.UtcNow;
-                if (usuario.IntentosFallidos >= 5)
+                var bloqueado = false;
+                if (!exentoDeBloqueo)
                 {
-                    usuario.BloqueadoHasta = DateTime.UtcNow.AddMinutes(15);
+                    usuario.IntentosFallidos++;
+                    usuario.UltimoIntentoFallido = DateTime.UtcNow;
+                    bloqueado = usuario.IntentosFallidos >= IntentosAntesDelBloqueo;
+                    if (bloqueado)
+                        usuario.BloqueadoHasta = DateTime.UtcNow.AddMinutes(MinutosDeBloqueo);
                 }
 
                 await _context.SaveChangesAsync();
-                return null;
+                await AuditarAsync("login_fallido", "rechazado", usuario.Id, null, null);
+                if (bloqueado)
+                    await AuditarAsync("login_bloqueado", "rechazado", usuario.Id, null, null);
+
+                return Invalido();
             }
 
             if (usuario.RequiereCambioPassword && !PasswordTemporalVigente(usuario, DateTime.UtcNow))
-                return null;
+            {
+                await _context.SaveChangesAsync();
+                await AuditarAsync("login_fallido", "rechazado", usuario.Id, null, "clave_temporal_vencida");
+                return Invalido();
+            }
 
+            if (usuario.MfaObligatorio && !usuario.TotpHabilitado)
+            {
+                if (!AuthPolicy.PermitirEnrolamientoMfa(_configuration))
+                    return new ResultadoIngreso { Estado = EstadoIngreso.VinculacionNoDisponible };
+
+                if (_protector == null)
+                    return new ResultadoIngreso { Estado = EstadoIngreso.NoDisponible };
+
+                var limiteVinculacion = _limite ?? new LimiteMfaPorIp();
+                if (!limiteVinculacion.Permitir(
+                        "emision",
+                        ip,
+                        AuthPolicy.MfaEmisionLimite(_configuration),
+                        TimeSpan.FromSeconds(AuthPolicy.MfaEmisionVentanaSegundos(_configuration))))
+                {
+                    return new ResultadoIngreso { Estado = EstadoIngreso.Limitado };
+                }
+
+                var modoVinculacion = modo == ModoSesionMfa.Renovable
+                    ? ModoSesionMfa.Renovable
+                    : ModoSesionMfa.Tradicional;
+                var ahoraVinculacion = DateTime.UtcNow;
+                var desafioVinculacion = TokenOpaco.Crear();
+                usuario.IntentosFallidos = 0;
+                usuario.BloqueadoHasta = null;
+                usuario.UltimoIntentoFallido = null;
+                var filaVinculacion = new DesafioMfa
+                {
+                    UsuarioId = usuario.Id,
+                    TokenHash = TokenOpaco.Hash(desafioVinculacion),
+                    ExpiraEn = ahoraVinculacion.AddMinutes(AuthPolicy.MfaEnrolamientoMinutos(_configuration)),
+                    Proposito = ModoSesionMfa.PropositoVinculacion,
+                    TokenVersion = usuario.TokenVersion,
+                    Generacion = modoVinculacion == ModoSesionMfa.Renovable ? generacion : null,
+                    ModoSesion = modoVinculacion,
+                    Intentos = 0
+                };
+                _context.DesafioMfa.Add(filaVinculacion);
+                await _context.SaveChangesAsync();
+                await AuditarAsync("mfa_desafio_emitido", "aceptado", usuario.Id, null, "vinculacion");
+                return new ResultadoIngreso
+                {
+                    Estado = EstadoIngreso.VinculacionPendiente,
+                    Desafio = desafioVinculacion,
+                    ExpiraEn = filaVinculacion.ExpiraEn
+                };
+            }
+
+            if (!usuario.TotpHabilitado)
+            {
+                usuario.IntentosFallidos = 0;
+                usuario.BloqueadoHasta = null;
+                usuario.UltimoIntentoFallido = null;
+                await _context.SaveChangesAsync();
+                await AuditarAsync("login_ok", "aceptado", usuario.Id, null, null);
+                return new ResultadoIngreso { Estado = EstadoIngreso.Autenticado, Respuesta = CrearRespuesta(usuario) };
+            }
+
+            if (_protector == null)
+                return new ResultadoIngreso { Estado = EstadoIngreso.NoDisponible };
+
+            var limite = _limite ?? new LimiteMfaPorIp();
+            if (!limite.Permitir(
+                    "emision",
+                    ip,
+                    AuthPolicy.MfaEmisionLimite(_configuration),
+                    TimeSpan.FromSeconds(AuthPolicy.MfaEmisionVentanaSegundos(_configuration))))
+            {
+                return new ResultadoIngreso { Estado = EstadoIngreso.Limitado };
+            }
+
+            var modoRegistrado = modo == ModoSesionMfa.Renovable
+                ? ModoSesionMfa.Renovable
+                : ModoSesionMfa.Tradicional;
+            var generacionRegistrada = modoRegistrado == ModoSesionMfa.Renovable ? generacion : null;
+            var ahora = DateTime.UtcNow;
+            var desafio = TokenOpaco.Crear();
             usuario.IntentosFallidos = 0;
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
+            var fila = new DesafioMfa
+            {
+                UsuarioId = usuario.Id,
+                TokenHash = TokenOpaco.Hash(desafio),
+                ExpiraEn = ahora.AddMinutes(AuthPolicy.MfaDesafioMinutos(_configuration)),
+                Proposito = ModoSesionMfa.PropositoLogin,
+                TokenVersion = usuario.TokenVersion,
+                Generacion = generacionRegistrada,
+                ModoSesion = modoRegistrado,
+                Intentos = 0
+            };
+            _context.DesafioMfa.Add(fila);
             await _context.SaveChangesAsync();
+            await AuditarAsync(
+                "mfa_desafio_emitido",
+                "aceptado",
+                usuario.Id,
+                null,
+                modoRegistrado);
+            return new ResultadoIngreso
+            {
+                Estado = EstadoIngreso.MfaRequerido,
+                Desafio = desafio,
+                ExpiraEn = fila.ExpiraEn
+            };
+        }
 
-            return CrearRespuesta(usuario);
+        private static ResultadoIngreso Invalido()
+        {
+            return new ResultadoIngreso { Estado = EstadoIngreso.Invalido };
         }
 
         public async Task<AuthResponseDto?> RegistrarUsuarioAsync(
@@ -80,8 +231,14 @@ namespace ControlFichajes.API.Services
             if (string.IsNullOrWhiteSpace(correo) || string.IsNullOrWhiteSpace(nombreUsuario))
                 return null;
 
-            if (await _context.Usuario.AnyAsync(u => u.Correo == correo))
+            var ocupante = await _context.Usuario.SingleOrDefaultAsync(u => u.Correo == correo);
+            if (ocupante != null && ocupante.EliminadoEn == null)
                 return null;
+            if (ocupante != null)
+            {
+                CorreoCuentaEliminada.Liberar(ocupante);
+                await _context.SaveChangesAsync();
+            }
 
             if (!await _context.Empresa.AnyAsync(e => e.Id == registroDto.EmpresaId))
                 return null;
@@ -94,6 +251,7 @@ namespace ControlFichajes.API.Services
 
             _context.Usuario.Add(usuario);
             await _context.SaveChangesAsync();
+            await AuditarAsync(bootstrap ? "usuario_bootstrap" : "usuario_alta", "aceptado", usuario.Id, null, null);
 
             return CrearRespuesta(usuario);
         }
@@ -102,7 +260,7 @@ namespace ControlFichajes.API.Services
         {
             var query = _context.Usuario
                 .AsNoTracking()
-                .AsQueryable();
+                .Where(u => u.EliminadoEn == null);
 
             if (empresaId.HasValue)
                 query = query.Where(u => u.EmpresaId == empresaId.Value);
@@ -128,9 +286,12 @@ namespace ControlFichajes.API.Services
                     Correo = u.Correo,
                     Rol = u.Rol,
                     Activo = u.Activo,
+                    InvitacionPendiente = !u.Activo && u.InvitadoEn != null && u.InvitacionAceptadaEn == null,
                     RequiereCambioPassword = u.RequiereCambioPassword,
                     Bloqueado = u.BloqueadoHasta != null && u.BloqueadoHasta > DateTime.UtcNow,
-                    BloqueadoHasta = u.BloqueadoHasta
+                    BloqueadoHasta = u.BloqueadoHasta,
+                    TotpHabilitado = u.TotpHabilitado,
+                    MfaObligatorio = u.MfaObligatorio
                 })
                 .ToListAsync();
         }
@@ -144,12 +305,16 @@ namespace ControlFichajes.API.Services
         public async Task<RestablecerPasswordResponseDto?> RestablecerPasswordAsync(int usuarioId)
         {
             var usuario = await _context.Usuario.FindAsync(usuarioId);
-            if (usuario == null || !usuario.Activo)
+            if (usuario == null || !usuario.Activo || usuario.EliminadoEn != null)
                 return null;
 
             var passwordTemporal = GenerarPasswordTemporal();
-            var passwordHash = _passwordHasher.HashPassword(usuario, passwordTemporal);
-            usuario.PasswordHash = passwordHash;
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (!usuario.Activo || usuario.EliminadoEn != null)
+                return null;
+
+            usuario.PasswordHash = _passwordHasher.HashPassword(usuario, passwordTemporal);
             usuario.RequiereCambioPassword = true;
             usuario.PasswordTemporalUsada = false;
             usuario.PasswordTemporalVenceEn = DateTime.UtcNow.AddHours(24);
@@ -157,8 +322,8 @@ namespace ControlFichajes.API.Services
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
             usuario.TokenVersion++;
-
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
+            await AuditarAsync("password_reset_admin", "aceptado", usuario.Id, null, null);
 
             return new RestablecerPasswordResponseDto
             {
@@ -173,19 +338,16 @@ namespace ControlFichajes.API.Services
             if (request.NuevaPassword != request.ConfirmarPassword)
                 return false;
 
-            if (request.NuevaPassword.Length < 8 || request.NuevaPassword.Length > 20)
-                return false;
-
-            var hasLetter = request.NuevaPassword.Any(char.IsLetter);
-            var hasDigit = request.NuevaPassword.Any(char.IsDigit);
-            var hasSpecial = request.NuevaPassword.Any(ch => !char.IsLetterOrDigit(ch) && !char.IsWhiteSpace(ch));
-            var hasNoSpaces = !request.NuevaPassword.Contains(' ');
-
-            if (!hasLetter || !hasDigit || !hasSpecial || !hasNoSpaces)
+            if (!PasswordPolitica.EsElegible(request.NuevaPassword))
                 return false;
 
             var usuario = await _context.Usuario.FindAsync(usuarioId);
-            if (usuario == null || !usuario.Activo)
+            if (usuario == null || !usuario.Activo || usuario.EliminadoEn != null)
+                return false;
+
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (!usuario.Activo || usuario.EliminadoEn != null)
                 return false;
 
             var actualOk = _passwordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, request.PasswordActual);
@@ -206,36 +368,45 @@ namespace ControlFichajes.API.Services
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
             usuario.TokenVersion++;
-
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
+            await AuditarAsync("password_cambio", "aceptado", usuario.Id, null, null);
             return true;
         }
 
         public async Task<bool> DesbloquearAsync(int usuarioId)
         {
             var usuario = await _context.Usuario.FindAsync(usuarioId);
-            if (usuario == null || !usuario.Activo)
+            if (usuario == null || !usuario.Activo || usuario.EliminadoEn != null)
                 return false;
 
             usuario.IntentosFallidos = 0;
             usuario.BloqueadoHasta = null;
             usuario.UltimoIntentoFallido = null;
             await _context.SaveChangesAsync();
+            await AuditarAsync("usuario_desbloqueo", "aceptado", usuario.Id, null, null);
             return true;
         }
 
         public async Task<UsuarioListItemDto?> CambiarEstadoAsync(int usuarioId, bool activo)
         {
             var usuario = await _context.Usuario.FindAsync(usuarioId);
-            if (usuario == null)
+            if (usuario == null || usuario.EliminadoEn != null)
                 return null;
 
             if (usuario.Activo == activo)
                 return ToListItem(usuario);
 
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (usuario.EliminadoEn != null)
+                return null;
+            if (usuario.Activo == activo)
+                return ToListItem(usuario);
+
             usuario.Activo = activo;
             usuario.TokenVersion++;
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
+            await AuditarAsync("usuario_estado", "aceptado", usuario.Id, null, activo ? "activo" : "inactivo");
             return ToListItem(usuario);
         }
 
@@ -245,7 +416,15 @@ namespace ControlFichajes.API.Services
                 return null;
 
             var usuario = await _context.Usuario.FindAsync(usuarioId);
-            if (usuario == null || AppRoles.IsSuperAdmin(usuario.Rol))
+            if (usuario == null || usuario.EliminadoEn != null || AppRoles.IsSuperAdmin(usuario.Rol))
+                return null;
+
+            if (string.Equals(usuario.Rol, rolNormalizado, StringComparison.Ordinal))
+                return ToListItem(usuario);
+
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (usuario.EliminadoEn != null || AppRoles.IsSuperAdmin(usuario.Rol))
                 return null;
 
             if (string.Equals(usuario.Rol, rolNormalizado, StringComparison.Ordinal))
@@ -253,9 +432,8 @@ namespace ControlFichajes.API.Services
 
             usuario.Rol = rolNormalizado;
             usuario.TokenVersion++;
-            // Deuda: el proyecto no tiene ILogger de auditoría. Registrar operador, objetivo,
-            // empresa, rol anterior, rol nuevo y fecha sin correo, JWT ni secretos.
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
+            await AuditarAsync("usuario_rol", "aceptado", usuario.Id, null, "rol=" + rolNormalizado);
             return ToListItem(usuario);
         }
 
@@ -270,12 +448,10 @@ namespace ControlFichajes.API.Services
             var correoNormalizado = NormalizarCorreo(correo ?? string.Empty);
 
             var usuario = await _context.Usuario.FindAsync(usuarioId);
-            if (usuario == null)
+            if (usuario == null || usuario.EliminadoEn != null)
                 return new IdentidadUpdateResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null);
 
-            var correoTomado = await _context.Usuario.AnyAsync(item =>
-                item.Id != usuarioId && item.Correo == correoNormalizado);
-            if (correoTomado)
+            if (!await CorreoDisponibleAsync(usuarioId, correoNormalizado))
                 return new IdentidadUpdateResult(StatusCodes.Status409Conflict, UsuarioIdentidadRules.CorreoDuplicado, null);
 
             var mismoNombre = string.Equals(usuario.NombreUsuario, nombreUsuario, StringComparison.Ordinal);
@@ -283,11 +459,136 @@ namespace ControlFichajes.API.Services
             if (mismoNombre && mismoCorreo)
                 return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
 
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (usuario.EliminadoEn != null)
+                return new IdentidadUpdateResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null);
+            if (!await CorreoDisponibleAsync(usuarioId, correoNormalizado))
+                return new IdentidadUpdateResult(StatusCodes.Status409Conflict, UsuarioIdentidadRules.CorreoDuplicado, null);
+
+            mismoNombre = string.Equals(usuario.NombreUsuario, nombreUsuario, StringComparison.Ordinal);
+            mismoCorreo = string.Equals(usuario.Correo, correoNormalizado, StringComparison.Ordinal);
+            if (mismoNombre && mismoCorreo)
+                return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
+
             usuario.NombreUsuario = nombreUsuario!;
             usuario.Correo = correoNormalizado;
             usuario.TokenVersion++;
-            await _context.SaveChangesAsync();
+            await ConfirmarRevocandoAsync(alcance, usuario);
+            await AuditarAsync("usuario_identidad", "aceptado", usuario.Id, null, "identidad");
             return new IdentidadUpdateResult(StatusCodes.Status200OK, UsuarioIdentidadRules.Actualizado, ToListItem(usuario));
+        }
+
+        public async Task<ExigirMfaResult> ExigirMfaAsync(int usuarioId)
+        {
+            var usuario = await _context.Usuario.FindAsync(usuarioId);
+            if (usuario == null || usuario.EliminadoEn != null)
+                return new ExigirMfaResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null, null);
+
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (usuario.EliminadoEn != null)
+                return new ExigirMfaResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null, null);
+
+            if (!usuario.Activo)
+            {
+                await AuditarAsync("mfa_obligacion_rechazada", "rechazado", usuario.Id, null, "inactivo");
+                return new ExigirMfaResult(StatusCodes.Status409Conflict, "Solo se puede exigir MFA en una cuenta activa.", null, null);
+            }
+
+            if (usuario.MfaObligatorio)
+            {
+                await AuditarAsync("mfa_obligacion_rechazada", "rechazado", usuario.Id, null, "ya_configurado");
+                return new ExigirMfaResult(StatusCodes.Status409Conflict, "La cuenta ya tiene MFA o una configuración pendiente.", null, null);
+            }
+
+            var yaTieneAutenticador = usuario.TotpHabilitado;
+            if (!yaTieneAutenticador && !AuthPolicy.PermitirEnrolamientoMfa(_configuration))
+            {
+                await AuditarAsync("mfa_obligacion_rechazada", "rechazado", usuario.Id, null, "enrolamiento");
+                return new ExigirMfaResult(
+                    StatusCodes.Status409Conflict,
+                    "No se puede exigir MFA mientras el enrolamiento está deshabilitado.",
+                    "mfa_enrolamiento_deshabilitado",
+                    null);
+            }
+
+            usuario.MfaObligatorio = true;
+            usuario.TokenVersion++;
+            await ConfirmarRevocandoAsync(alcance, usuario);
+            await AuditarAsync("mfa_obligacion_exigida", "aceptado", usuario.Id, null, yaTieneAutenticador ? "autenticador" : "obligacion");
+            return new ExigirMfaResult(StatusCodes.Status200OK, "Se exigió la configuración de MFA.", null, ToListItem(usuario));
+        }
+
+        public async Task<EliminarCuentaResult> EliminarCuentaAsync(int usuarioId)
+        {
+            var usuario = await _context.Usuario.FindAsync(usuarioId);
+            if (usuario == null || usuario.EliminadoEn != null)
+                return new EliminarCuentaResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null);
+
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (usuario.EliminadoEn != null)
+                return new EliminarCuentaResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null);
+
+            if (usuario.Activo)
+            {
+                await AuditarAsync("usuario_eliminacion_rechazada", "rechazado", usuario.Id, null, "activo");
+                return new EliminarCuentaResult(StatusCodes.Status409Conflict, "Solo se puede eliminar una cuenta desactivada.", "cuenta_activa");
+            }
+
+            if (EsInvitacionPendiente(usuario))
+            {
+                await AuditarAsync("usuario_eliminacion_rechazada", "rechazado", usuario.Id, null, "invitacion_pendiente");
+                return new EliminarCuentaResult(StatusCodes.Status409Conflict, "No se puede eliminar una invitación pendiente.", "invitacion_pendiente");
+            }
+
+            usuario.Activo = false;
+            usuario.EliminadoEn = DateTime.UtcNow;
+            usuario.TokenVersion++;
+            await ConfirmarRevocandoAsync(alcance, usuario);
+            await AuditarAsync("usuario_eliminado", "aceptado", usuario.Id, null, "baja");
+            return new EliminarCuentaResult(StatusCodes.Status200OK, "Cuenta eliminada.", null);
+        }
+
+        public async Task<EliminarCuentaResult> CancelarInvitacionAsync(int usuarioId)
+        {
+            var usuario = await _context.Usuario.FindAsync(usuarioId);
+            if (usuario == null || usuario.EliminadoEn != null)
+                return new EliminarCuentaResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null);
+
+            await using var alcance = await AlcanceUsuario.AbrirAsync(_context, usuario.Id);
+            await _context.Entry(usuario).ReloadAsync();
+            if (usuario.EliminadoEn != null)
+                return new EliminarCuentaResult(StatusCodes.Status404NotFound, "Usuario no encontrado.", null);
+
+            if (!EsInvitacionPendiente(usuario))
+            {
+                await AuditarAsync("invitacion_cancelacion_rechazada", "rechazado", usuario.Id, null, usuario.Activo ? "activa" : "no_pendiente");
+                return new EliminarCuentaResult(StatusCodes.Status409Conflict, "Solo se puede cancelar una invitación pendiente.", "no_pendiente");
+            }
+
+            var ahora = DateTime.UtcNow;
+            var abiertas = await _context.InvitacionUsuario
+                .Where(i => i.UsuarioId == usuario.Id && i.UsadaEn == null && i.ExpiraEn > ahora)
+                .ToListAsync();
+            foreach (var invitacion in abiertas)
+                invitacion.ExpiraEn = ahora;
+
+            usuario.Activo = false;
+            usuario.EliminadoEn = ahora;
+            usuario.TokenVersion++;
+            await ConfirmarRevocandoAsync(alcance, usuario);
+            await AuditarAsync("invitacion_cancelada", "aceptado", usuario.Id, null, "baja");
+            return new EliminarCuentaResult(StatusCodes.Status200OK, "Invitación cancelada.", null);
+        }
+
+        private static bool EsInvitacionPendiente(Usuario usuario)
+        {
+            return usuario.EliminadoEn == null
+                && !usuario.Activo
+                && usuario.InvitadoEn != null
+                && usuario.InvitacionAceptadaEn == null;
         }
 
         private static UsuarioListItemDto ToListItem(Usuario usuario)
@@ -300,9 +601,12 @@ namespace ControlFichajes.API.Services
                 Correo = usuario.Correo,
                 Rol = usuario.Rol,
                 Activo = usuario.Activo,
+                InvitacionPendiente = EsInvitacionPendiente(usuario),
                 RequiereCambioPassword = usuario.RequiereCambioPassword,
                 Bloqueado = usuario.BloqueadoHasta != null && usuario.BloqueadoHasta > DateTime.UtcNow,
-                BloqueadoHasta = usuario.BloqueadoHasta
+                BloqueadoHasta = usuario.BloqueadoHasta,
+                TotpHabilitado = usuario.TotpHabilitado,
+                MfaObligatorio = usuario.MfaObligatorio
             };
         }
 
@@ -322,6 +626,20 @@ namespace ControlFichajes.API.Services
 
             usuario.PasswordHash = _passwordHasher.HashPassword(usuario, registroDto.Password);
             return usuario;
+        }
+
+        private async Task<bool> CorreoDisponibleAsync(int usuarioId, string correo)
+        {
+            var ocupante = await _context.Usuario.SingleOrDefaultAsync(item =>
+                item.Id != usuarioId && item.Correo == correo);
+            if (ocupante == null)
+                return true;
+            if (ocupante.EliminadoEn == null)
+                return false;
+
+            CorreoCuentaEliminada.Liberar(ocupante);
+            await _context.SaveChangesAsync();
+            return true;
         }
 
         private static string NormalizarCorreo(string correo)
@@ -367,6 +685,38 @@ namespace ControlFichajes.API.Services
             return !usuario.PasswordTemporalUsada &&
                 usuario.PasswordTemporalVenceEn.HasValue &&
                 usuario.PasswordTemporalVenceEn.Value > ahora;
+        }
+
+        private async Task AuditarAsync(
+            string evento,
+            string resultado,
+            int? usuarioId,
+            string? correo,
+            string? detalle)
+        {
+            if (_auditoria == null)
+                return;
+
+            try
+            {
+                await _auditoria.RegistrarAsync(evento, resultado, usuarioId, correo, detalle);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(
+                    "No se pudo registrar la auditoría de seguridad. Evento={Evento} Excepcion={Excepcion}",
+                    evento,
+                    ex.GetType().Name);
+            }
+        }
+
+        private async Task ConfirmarRevocandoAsync(AlcanceUsuario alcance, Usuario usuario)
+        {
+            var revocadas = await RevocacionSesiones.MarcarTodasAsync(_context, usuario.Id, DateTime.UtcNow);
+            await _context.SaveChangesAsync();
+            await alcance.ConfirmarAsync();
+            if (revocadas > 0)
+                await AuditarAsync("sesion_revocada", "aceptado", usuario.Id, null, "token_version");
         }
 
         private AuthResponseDto CrearRespuesta(Usuario usuario)

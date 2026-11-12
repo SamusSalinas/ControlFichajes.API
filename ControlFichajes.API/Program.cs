@@ -6,12 +6,91 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.AspNetCore.Identity;
 using ControlFichajes.API.Models;
+using ControlFichajes.API.Controllers;
 using ControlFichajes.API.Security;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
 
 builder.Services.AddControllers();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { mensaje = "Demasiadas solicitudes. Intentá más tarde." },
+            cancellationToken);
+    };
+    options.AddPolicy(AuthController.PoliticaLimiteAceptacion, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.AceptacionLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.AceptacionVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(AuthController.PoliticaLimiteRecuperacionSolicitud, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.RecuperacionSolicitudLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.RecuperacionSolicitudVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(AuthController.PoliticaLimiteRecuperacionRestablecer, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.RecuperacionRestablecerLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.RecuperacionRestablecerVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(AuthController.PoliticaLimiteRefresh, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.RefreshLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.RefreshVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(AuthController.PoliticaLimiteCierre, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.CierreLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.CierreVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(CorreoSalienteController.PoliticaLimiteGuardado, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromSeconds(60),
+                QueueLimit = 0
+            }));
+    options.AddPolicy(CorreoSalienteController.PoliticaLimitePrueba, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthPolicy.CorreoPruebaLimite(builder.Configuration),
+                Window = TimeSpan.FromSeconds(AuthPolicy.CorreoPruebaVentanaSegundos(builder.Configuration)),
+                QueueLimit = 0
+            }));
+});
+builder.Services.AddHttpContextAccessor();
 
 builder.Configuration.AddJsonFile(
     $"appsettings.{builder.Environment.EnvironmentName}.local.json",
@@ -27,6 +106,8 @@ if (string.IsNullOrWhiteSpace(connectionString))
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.Parse("8.0.0-mysql")));
+builder.Services.AddScoped<IDbContextFactory<AppDbContext>, AuditoriaDbContextFactory>();
+builder.Services.AddScoped<IAuditoriaSeguridad, AuditoriaSeguridadService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
@@ -38,12 +119,32 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddSingleton<ProtectorContrasenaSmtp>();
+builder.Services.AddScoped<ConfiguracionCorreoServicio>(sp => new ConfiguracionCorreoServicio(
+    sp.GetRequiredService<IConfiguration>(),
+    sp.GetRequiredService<ProtectorContrasenaSmtp>(),
+    sp.GetRequiredService<ILogger<ConfiguracionCorreoServicio>>(),
+    Path.Combine(sp.GetRequiredService<IHostEnvironment>().ContentRootPath, "smtp.panel.json")));
+builder.Services.AddScoped<IConfiguracionCorreoActiva>(sp => sp.GetRequiredService<ConfiguracionCorreoServicio>());
+builder.Services.AddScoped<MailKitCorreoSaliente>();
+builder.Services.AddScoped<ICorreoSaliente>(sp => sp.GetRequiredService<MailKitCorreoSaliente>());
+builder.Services.AddScoped<ICorreoConConexion>(sp => sp.GetRequiredService<MailKitCorreoSaliente>());
+builder.Services.AddScoped<ICorreoPruebaService, CorreoPruebaService>();
+builder.Services.AddScoped<IInvitacionUsuarioService, InvitacionUsuarioService>();
+builder.Services.AddScoped<IRecuperacionPasswordService, RecuperacionPasswordService>();
+builder.Services.AddScoped<SesionWebService>();
+builder.Services.AddScoped<ISesionWebService>(sp => sp.GetRequiredService<SesionWebService>());
+builder.Services.AddSingleton<ILimiteMfaPorIp, LimiteMfaPorIp>();
+builder.Services.AddScoped<IVerificacionMfaService, VerificacionMfaService>();
+builder.Services.AddScoped<IEnrolamientoMfaService, EnrolamientoMfaService>();
 builder.Services.AddScoped<ITokenService, JwtTokenService>();
+builder.Services.AddSingleton<IProtectorSecretosMfa, ProtectorSecretosMfa>();
 builder.Services.AddScoped<IAgenteAuthService, AgenteAuthService>();
 builder.Services.AddScoped<IAgenteAdminService, AgenteAdminService>();
 builder.Services.AddScoped<IAgenteLectorService, AgenteLectorService>();
@@ -100,6 +201,9 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("PuedeAdministrarDepartamentos", policy => policy
         .RequireClaim("token_use", "web")
         .RequireRole("SuperAdmin", "ADMIN"));
+    options.AddPolicy("SoloSuperAdmin", policy => policy
+        .RequireClaim("token_use", "web")
+        .RequireRole("SuperAdmin"));
 });
 
 var app = builder.Build();
@@ -109,10 +213,15 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+var forwarded = new ForwardedHeadersOptions();
+if (ProxyConfiable.IntentarAplicar(forwarded, app.Configuration.GetSection(ProxyConfiable.Seccion), app.Logger))
+    app.UseForwardedHeaders(forwarded);
+
 app.UseHttpsRedirection();
 app.UseCors("PermitirFrontend");
 
 // 4. Agregar middlewares de autenticación y autorización (el ORDEN es vital)
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<WebSessionSecurityMiddleware>();
 app.UseMiddleware<EmpresaContextMiddleware>();
